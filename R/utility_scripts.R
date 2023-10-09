@@ -1,126 +1,75 @@
-# Load Required Packages
-for (lib in c('vegan', 'chemometrics', 'car', 'metagenomeSeq', 'edgeR')) {
-    suppressPackageStartupMessages(require(lib, character.only = TRUE))
-}
-
-
-###################
-## Transformation #
-###################
-
-transformFeatures = function(features, transformation) {
-    if (transformation == 'LOG')     {
-        features <- apply(features, 2, LOG)
-    }
-    
-    if (transformation == 'LOGIT')     {
-        features <- apply(features, 2, LOGIT)
-    }
-    
-    if (transformation == 'AST')     {
-        features <- apply(features, 2, AST)
-    }
-    
-    return(features)
-}
-
-
-##################
-## Normalization #
-##################
-
-normalizeFeatures = function(features, normalization) {
-    if (normalization == 'TSS')
-    {
-        features <- TSSnorm(features)
-    }
-    
-    if (normalization == 'CLR')
-    {
-        features <- CLRnorm(features)
-    }
-    
-    if (normalization == 'CSS')
-    {
-        features <- CSSnorm(features)
-    }
-    
-    if (normalization == 'TMM')
-    {
-        features <- TMMnorm(features)
-    }
-    
-    if (normalization == 'NONE')
-    {
-        features <- features
-    }
-    
-    return(features)
-}
-
 ######################
 ## TSS Normalization #
 ######################
 
-# Apply TSS Normalization To A Dataset
-
 TSSnorm = function(features) {
-    # Convert to Matrix from Data Frame
-    features_norm = as.matrix(features)
-    dd <- colnames(features_norm)
-    
-    # TSS Normalizing the Data
-    features_TSS <-
-        vegan::decostand(
-            features_norm,
-            method = "total",
-            MARGIN = 1,
-            na.rm = TRUE)
-    
-    # Convert back to data frame
-    features_TSS <- as.data.frame(features_TSS)
-    
-    # Rename the True Positive Features - Same Format as Before
-    colnames(features_TSS) <- dd
-    
-    
-    # Return
-    return(features_TSS)
+  # Convert to Matrix from Data Frame
+  features_norm = as.matrix(features)
+  dd <- colnames(features_norm)
+  
+  ##############
+  # From vegan #
+  ##############
+  
+  x <- as.matrix(features_norm)
+  if (any(x < 0, na.rm = TRUE)) {
+    k <- min(x, na.rm = TRUE)
+    warning("input data contains negative entries: result may be non-sense")
+  } else {
+    k <- .Machine$double.eps
+  }
+  
+  MARGIN <- 1
+  
+  tmp <- pmax(k, apply(x, MARGIN, sum, na.rm = TRUE))
+  x <- sweep(x, MARGIN, tmp, "/")
+  attr <- list(total = tmp, margin = MARGIN)
+  if (any(is.nan(x))) 
+    warning("result contains NaN, perhaps due to impossible mathematical\n
+            operation\n")
+  
+  # Convert back to data frame
+  features_TSS <- as.data.frame(x)
+  
+  # Rename the True Positive Features - Same Format as Before
+  colnames(features_TSS) <- dd
+  
+  # Return
+  return(features_TSS)
 }
-
 
 ######################
 ## CLR Normalization #
 ######################
 
-# Apply CLR Normalization To A Dataset
-
 CLRnorm = function(features) {
-    # Convert to Matrix from Data Frame
-    features_norm = as.matrix(features)
-    dd <- colnames(features_norm)
-    
-    # CLR Normalizing the Data
-    features_CLR <- chemometrics::clr(features_norm + 1)
-    
-    # Convert back to data frame
-    features_CLR <- as.data.frame(features_CLR)
-    
-    # Rename the True Positive Features - Same Format as Before
-    colnames(features_CLR) <- dd
-    
-    
-    # Return
-    return(features_CLR)
+  # Convert to Matrix from Data Frame
+  features_norm = as.matrix(features)
+  dd <- colnames(features_norm)
+  
+  #####################
+  # from chemometrics #
+  #####################
+  
+  # CLR Normalizing the Data
+  X <- features_norm + 1
+  Xgeom <- exp(1)^apply(log(X), 1, mean)
+  features_CLR <- log(X/Xgeom)
+  
+  # Convert back to data frame
+  features_CLR <- as.data.frame(features_CLR)
+  
+  # Rename the True Positive Features - Same Format as Before
+  colnames(features_CLR) <- dd
+  
+  # Return
+  return(features_CLR)
 }
 
 ######################
 ## CSS Normalization #
 ######################
 
-<<<<<<< Updated upstream
-# Apply CSS Normalization To A Dataset
-=======
 ######################
 # From metagenomeSeq #
 ######################
@@ -196,87 +145,162 @@ MRcounts <- function (counts, norm_factors, sl = 1000)  {
   if (any(is.na(norm_factors))) {
     x = cumNormMat(as.matrix(counts), sl = sl)
   } else {
+    print(dim(counts))
+    print(norm_factors/sl)
     x = sweep(as.matrix(counts), 2, norm_factors/sl, "/")
   }
   return(x)
 }
->>>>>>> Stashed changes
 
 CSSnorm = function(features) {
-    # Convert to Matrix from Data Frame
-    features_norm = as.matrix(features)
-    dd <- colnames(features_norm)
-    
-    # CSS Normalizing the Data
-    # Create the metagenomeSeq object
-    MGS = metagenomeSeq::newMRexperiment(
-        t(features_norm),
-        featureData = NULL,
-        libSize = NULL,
-        normFactors = NULL
-    )
-    # Trigger metagenomeSeq to calculate its Cumulative Sum scaling factor.
-    MGS = metagenomeSeq::cumNorm(MGS, p = metagenomeSeq::cumNormStat(MGS))
-    # Save the normalized data as data.frame
-    features_CSS = as.data.frame(t(
-        metagenomeSeq::MRcounts(MGS, norm = TRUE, log = FALSE)))
-    
-    # Rename the True Positive Features - Same Format as Before
-    colnames(features_CSS) <- dd
-    
-    
-    # Return as list
-    return(features_CSS)
+  features_norm = as.matrix(features)
+  dd <- colnames(features_norm)
+  
+  counts = t(features_norm)
+  norm_factors <- calcNormFactors(counts)$normFactors
+  features_CSS <- as.data.frame(t(MRcounts(counts, norm_factors)))
+  
+  colnames(features_CSS) <- dd
+  
+  return(features_CSS)
 }
 
 ######################
 ## TMM Normalization #
 ######################
 
-# Apply TMM Normalization To A Dataset
+##############
+# From edgeR #
+##############
+
+.calcFactorQuantile <- function (data, lib.size, p=0.75)
+  #	Generalized version of upper-quartile normalization
+  #	Mark Robinson and Gordon Smyth
+  #	Created 16 Aug 2010. Last modified 12 Sep 2020.
+{
+  f <- rep_len(1,ncol(data))
+  for (j in seq_len(ncol(data))) f[j] <- quantile(data[,j], probs=p)
+  if(min(f)==0) warning("One or more quantiles are zero")
+  f / lib.size
+}
+
+.calcFactorTMM <- function(obs, ref, libsize.obs=NULL, libsize.ref=NULL, logratioTrim=.3, sumTrim=0.05, doWeighting=TRUE, Acutoff=-1e10)
+  #	TMM between two libraries
+  #	Mark Robinson
+{
+  obs <- as.numeric(obs)
+  ref <- as.numeric(ref)
+  
+  if( is.null(libsize.obs) ) nO <- sum(obs) else nO <- libsize.obs
+  if( is.null(libsize.ref) ) nR <- sum(ref) else nR <- libsize.ref
+  
+  logR <- log2((obs/nO)/(ref/nR))          # log ratio of expression, accounting for library size
+  absE <- (log2(obs/nO) + log2(ref/nR))/2  # absolute expression
+  v <- (nO-obs)/nO/obs + (nR-ref)/nR/ref   # estimated asymptotic variance
+  
+  #	remove infinite values, cutoff based on A
+  fin <- is.finite(logR) & is.finite(absE) & (absE > Acutoff)
+  
+  logR <- logR[fin]
+  absE <- absE[fin]
+  v <- v[fin]
+  
+  if(max(abs(logR)) < 1e-6) return(1)
+  
+  #	taken from the original mean() function
+  n <- length(logR)
+  loL <- floor(n * logratioTrim) + 1
+  hiL <- n + 1 - loL
+  loS <- floor(n * sumTrim) + 1
+  hiS <- n + 1 - loS
+  
+  #	keep <- (rank(logR) %in% loL:hiL) & (rank(absE) %in% loS:hiS)
+  #	a fix from leonardo ivan almonacid cardenas, since rank() can return
+  #	non-integer values when there are a lot of ties
+  keep <- (rank(logR)>=loL & rank(logR)<=hiL) & (rank(absE)>=loS & rank(absE)<=hiS)
+  
+  if(doWeighting)
+    f <- sum(logR[keep]/v[keep], na.rm=TRUE) / sum(1/v[keep], na.rm=TRUE)
+  else
+    f <- mean(logR[keep], na.rm=TRUE)
+  
+  #	Results will be missing if the two libraries share no features with positive counts
+  #	In this case, return unity
+  if(is.na(f)) f <- 0
+  2^f
+}
 
 TMMnorm = function(features) {
-    # Convert to Matrix from Data Frame
-    features_norm = as.matrix(features)
-    dd <- colnames(features_norm)
-    
-    # TMM Normalizing the Data
-    X <- t(features_norm)
-    
-    libSize = edgeR::calcNormFactors(X, method = "TMM")
-    eff.lib.size = colSums(X) * libSize
-    
-    ref.lib.size = mean(eff.lib.size)
-    #Use the mean of the effective library sizes as a reference library size
-    X.output = sweep(X, MARGIN = 2, eff.lib.size, "/") * ref.lib.size
-    #Normalized read counts
-    
-    # Convert back to data frame
-    features_TMM <- as.data.frame(t(X.output))
-    
-    # Rename the True Positive Features - Same Format as Before
-    colnames(features_TMM) <- dd
-    
-    
-    # Return as list
-    return(features_TMM)
+  # Convert to Matrix from Data Frame
+  features_norm = as.matrix(features)
+  dd <- colnames(features_norm)
+  
+  # TMM Normalizing the Data
+  X <- t(features_norm)
+  x <- as.matrix(X)
+  if (any(is.na(x)))
+    stop("NA counts not permitted")
+  nsamples <- ncol(x)
+  lib.size <- colSums(x)
+  method <- "TMM"
+  allzero <- .rowSums(x > 0, nrow(x), nsamples) == 0L
+  if (any(allzero))
+    x <- x[!allzero, , drop = FALSE]
+  if (nrow(x) == 0 || nsamples == 1)
+    method = "none"
+  
+  f <- switch(method, TMM = {
+    f75 <- suppressWarnings(.calcFactorQuantile(data = x, 
+                                                lib.size = lib.size, p = 0.75))
+    if (median(f75) < 1e-20) {
+      refColumn <- which.max(colSums(sqrt(x)))
+    } else {
+      refColumn <- which.min(abs(f75 - mean(f75)))
+    }
+    f <- rep_len(NA_real_, nsamples)
+    for (i in 1:nsamples) {
+      f[i] <- .calcFactorTMM(obs = x[,i], ref = x[, refColumn], libsize.obs = lib.size[i], 
+                             libsize.ref = lib.size[refColumn], logratioTrim = 0.3, 
+                             sumTrim = 0.05, doWeighting = TRUE, Acutoff = -1e+10)
+    }
+    f
+  }, 
+  none = rep_len(1, nsamples))
+  f <- f/exp(mean(log(f)))
+  names(f) <- colnames(x)
+  libSize <- f
+  
+  eff.lib.size = colSums(X) * libSize
+  
+  ref.lib.size = mean(eff.lib.size)
+  #Use the mean of the effective library sizes as a reference library size
+  X.output = sweep(X, MARGIN = 2, eff.lib.size, "/") * ref.lib.size
+  #Normalized read counts
+  
+  # Convert back to data frame
+  features_TMM <- as.data.frame(t(X.output))
+  
+  # Rename the True Positive Features - Same Format as Before
+  colnames(features_TMM) <- dd
+  
+  # Return as list
+  return(features_TMM)
 }
 
 #######################################
 # Arc-Sine Square Root Transformation #
 #######################################
 
-# Arc Sine Square Root Transformation
 AST <- function(x) {
-    y <- sign(x) * asin(sqrt(abs(x)))
-    if(any(is.na(y))) {
-        logging::logerror(
-            paste0("AST transform is only valid for values between -1 and 1. ",
-                   "Please select an appropriate normalization option or ",
-                   "normalize your data prior to running."))
-        stop()
-    }
-    return(y)
+  y <- sign(x) * asin(sqrt(abs(x)))
+  if(any(is.na(y))) {
+    logging::logerror(
+      paste0("AST transform is only valid for values between -1 and 1. ",
+             "Please select an appropriate normalization option or ",
+             "normalize your data prior to running."))
+    stop()
+  }
+  return(y)
 }
 
 ########################
@@ -284,30 +308,41 @@ AST <- function(x) {
 ########################
 
 # Zero-inflated Logit Transformation (Does not work well for microbiome data)
-LOGIT <- function(x) {
-    y <- car::logit(x, adjust = 0)
-    y[!is.finite(y)] <- 0
-    return(y)
+LOGIT <- function(p) {
+  
+  ########################
+  # From the car package #
+  ########################
+  
+  range.p <- range(p, na.rm = TRUE)
+  if (range.p[2] > 1) {
+    percents <- TRUE
+    logging::loginfo("Note: largest value of p > 1 so values of p interpreted as percents")
+  } else {
+    percents <- FALSE
+  }
+  if (percents) {
+    if (range.p[1] < 0 || range.p[2] > 100) 
+      stop("p must be in the range 0 to 100")
+    p <- p/100
+    range.p <- range.p/100
+  } else if (range.p[1] < 0 || range.p[2] > 1)  {
+    stop("p must be in the range 0 to 1")
+  }
+  a <- 1
+  y <- log((0.5 + a * (p - 0.5))/(1 - (0.5 + a * (p - 0.5))))
+  y[!is.finite(y)] <- 0
+  return(y)
 }
-
-# Shifted Logit Transformation (Lukens et al, 2014, Nature)
-# LOGIT_S<-function(x){
-#     y<-0.5*log(x/(1-x)) + 10
-#     y[!is.finite(y)]<-0
-#     return(y)
-# }
 
 ######################
 # Log Transformation #
 ######################
 
-# Log Transformation
 LOG <- function(x) {
-    y <- replace(x, x == 0, min(x[x>0]) / 2)
-    return(log2(y))
+  y <- replace(x, x == 0, min(x[x>0]) / 2)
+  return(log2(y))
 }
-<<<<<<< Updated upstream
-=======
 
 ############################
 # Write out the model fits #
@@ -478,7 +513,3 @@ write_results <- function(params_data_formula_fit) {
     row.names = FALSE
   )
 }
-
-
-
->>>>>>> Stashed changes

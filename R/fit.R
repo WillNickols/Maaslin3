@@ -1,16 +1,12 @@
 # Load Required Packages
 for (lib in c(
-    'dplyr',
-    'pbapply',
-    'lmerTest',
-    'car',
-    'parallel',
-    'glmmTMB',
-    'MASS',
-    'cplm',
-    'pscl'
+  'dplyr',
+  'pbapply',
+  'lmerTest',
+  'parallel',
+  'lme4'
 )) {
-    suppressPackageStartupMessages(require(lib, character.only = TRUE))
+  suppressPackageStartupMessages(require(lib, character.only = TRUE))
 }
 
 # fit the data using the model selected and applying the correction
@@ -26,7 +22,6 @@ fit.data <-
         cores = 1) {
       
         # set the formula default to all fixed effects if not provided
-<<<<<<< Updated upstream
         if (is.null(formula))
             formula <-
                 as.formula(paste(
@@ -34,16 +29,6 @@ fit.data <-
                     paste(colnames(metadata), 
                     collapse = "+")))
 
-        if (!(is.null(random_effects_formula))) {
-            formula <-
-                paste(
-                    '. ~', 
-                    paste(all.vars(formula)[-1], collapse = ' + '), 
-                    '.', 
-                    sep = ' + ')
-	    formula <- update(random_effects_formula, formula)
-	}
-=======
         if (is.null(random_effects_formula)) {
           if (is.null(formula)) {
             logging::logerror(
@@ -52,8 +37,7 @@ fit.data <-
             stop()
           }
         }
->>>>>>> Stashed changes
-        
+
         #############################################################
         # Determine the function and summary for the model selected #
         #############################################################
@@ -96,119 +80,6 @@ fit.data <-
                 }
             }
         }
-        
-        ####################
-        # Compound Poisson #
-        ####################
-      
-        if (model == "CPLM") {
-            if (is.null(random_effects_formula)) {
-              model_function <- cplm::cpglm
-              summary_function <- function(fit) {
-                cplm_out <-
-                  capture.output(
-                    cplm_summary <- cplm::summary(fit)$coefficients)
-                    para <- as.data.frame(cplm_summary)[-1, -3]
-                    para$name <- rownames(cplm_summary)[-1]
-                    logging::logdebug(
-                        "Summary output\n%s", 
-                        paste(cplm_out, collapse = "\n"))
-                    return(para)
-                    }
-              } else {
-                ranef_function <- glmmTMB::ranef
-                model_function <-
-                    function(formula, data, na.action) {
-                        return(glmmTMB::glmmTMB(
-                            formula,
-                            data = data,
-                            family=glmmTMB::tweedie(link = "log"),
-                            ziformula = ~0,
-                            na.action = na.action
-                        ))
-                    }
-                summary_function <- function(fit) {
-                  glmmTMB_summary <- coef(summary(fit))
-                  para <- as.data.frame(glmmTMB_summary$cond)[-1, -3]
-                  para$name <- rownames(glmmTMB_summary$cond)[-1]
-                  return(para)
-                }
-              }
-          }
-        
-        #####################
-        # Negative Binomial #
-        #####################
-        
-        if (model == "NEGBIN") {
-            if (is.null(random_effects_formula)) {
-                model_function <- MASS::glm.nb
-                summary_function <- function(fit) {
-                  glm_summary <- summary(fit)$coefficients
-                  para <- as.data.frame(glm_summary)[-1, -3]
-                  para$name <- rownames(glm_summary)[-1]
-                  return(para)
-                  }
-            } else {
-              ranef_function <- glmmTMB::ranef
-              model_function <-
-                    function(formula, data, na.action) {
-                        return(glmmTMB::glmmTMB(
-                            formula,
-                            data = data,
-                            family=glmmTMB::nbinom2(link = "log"),
-                            ziformula = ~0,
-                            na.action = na.action
-                        ))
-                    }
-                summary_function <- function(fit) {
-                  glmmTMB_summary <- coef(summary(fit))
-                  para <- as.data.frame(glmmTMB_summary$cond)[-1, -3]
-                  para$name <- rownames(glmmTMB_summary$cond)[-1]
-                  return(para)
-                }
-            }
-          }
-        
-        ###################################
-        # Zero-inflated Negative Binomial #
-        ###################################
-        
-        if (model == "ZINB") {
-          if (is.null(random_effects_formula)) {
-            model_function <-
-              function(formula, data, na.action) {
-                return(pscl::zeroinfl(
-                  formula,
-                  data = data,
-                  dist = "negbin",
-                  na.action = na.action))
-                }
-            summary_function <- function(fit) {
-              pscl_summary <- summary(fit)$coefficients$count
-              para <-as.data.frame(pscl_summary)[-c(1, (ncol(metadata) + 2)), -3]
-	            para$name <- rownames(pscl_summary)[-c(1, (ncol(metadata) + 2))]
-	            return(para)
-	            }
-            } else {
-              ranef_function <- glmmTMB::ranef
-              model_function <-
-                function(formula, data, na.action) {
-                  return(glmmTMB::glmmTMB(
-                    formula,
-                    data = data,
-                    family=glmmTMB::nbinom2(link = "log"),
-                    ziformula = ~1,
-                    na.action = na.action))
-                  }
-              summary_function <- function(fit) {
-                glmmTMB_summary <- coef(summary(fit))
-                para <- as.data.frame(glmmTMB_summary$cond)[-1, -3]
-                para$name <- rownames(glmmTMB_summary$cond)[-1]
-                return(para)
-              }
-            }
-          }
         
         #######################################
         # Init cluster for parallel computing #
