@@ -33,16 +33,16 @@ metadata <- read.csv("HMP2_metadata.tsv", sep="\t")
 rownames(metadata) <- metadata$ID
 metadata$ID <- NULL
 
-# taxa <- taxa[rownames(taxa) %in% rownames(metadata)[!is.na(metadata$age)],]
-# metadata <- metadata[rownames(metadata) %in% rownames(metadata)[!is.na(metadata$age)],]
+taxa <- taxa[rownames(taxa) %in% rownames(metadata)[!is.na(metadata$age)],]
+metadata <- metadata[rownames(metadata) %in% rownames(metadata)[!is.na(metadata$age)],]
 
 metadata$interaction <- metadata$age * (metadata$dysbiosis_binary == "Yes")
 metadata$age_squared <- metadata$age^2
 
 x <- Maaslin2(list("input_data" = taxa, "input_metadata" = metadata, "output" = "output", fixed_effects = c("age", "age_squared"), min_abundance = 0.1, min_prevalence = 0.02, min_variance = 0.01, max_significance = 0.2, normalization = "TSS", plot_scatter = F, plot_heatmap = F, save_scatter = F, save_models = F, standardize=F))
-y <- Maaslin2(list("input_data" = taxa, "input_metadata" = metadata, "output" = "output", formula = "age + I(age^2)", min_abundance = 0.1, min_prevalence = 0.02, min_variance = 0.01, max_significance = 0.2, normalization = "TSS", plot_scatter = F, plot_heatmap = F, save_scatter = F, save_models = F, standardize=F))
+y <- Maaslin2(list("input_data" = taxa, "input_metadata" = metadata, "output" = "output", formula = "poly(age, 2)", min_abundance = 0.1, min_prevalence = 0.02, min_variance = 0.01, max_significance = 0.2, normalization = "TSS", plot_scatter = F, plot_heatmap = F, save_scatter = F, save_models = F, standardize=F))
 
-y <- Maaslin2::Maaslin2("input_data" = taxa, "input_metadata" = metadata, "output" = "output", fixed_effects = c("age"), random_effects = c("subject"), min_abundance = 0.1, min_prevalence = 0.02, min_variance = 0.01, max_significance = 0.2, normalization = "TSS", plot_scatter = F, plot_heatmap = F, save_scatter = F, save_models = F)
+y <- Maaslin2::Maaslin2("input_data" = taxa, "input_metadata" = metadata, "output" = "output", fixed_effects = c("age", "diagnosis"), random_effects = c("subject"), reference = ('diagnosis,`CD`'), min_abundance = 0.1, min_prevalence = 0.02, min_variance = 0.01, max_significance = 0.2, normalization = "TSS", plot_scatter = F, plot_heatmap = F, save_scatter = F, save_models = F)
 
 sum(x$fitted == y$fitted, na.rm=T)
 sum(x$fitted != y$fitted, na.rm=T)
