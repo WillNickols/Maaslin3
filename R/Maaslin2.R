@@ -1027,6 +1027,13 @@ maaslin_filter_and_standardize <- function(params_and_data_and_formula) {
   logging::loginfo("Filtered feature names from abundance and prevalence filtering: %s",
                    toString(filtered_feature_names))
   
+  ##################################################################################
+  # Apply the non-zero abundance threshold to split the data into 0s and non-zeros #
+  ##################################################################################
+  
+  prevalence_mask <- ifelse(filtered_data > param_list[["min_abundance"]], 1, 0)
+  filtered_data <- filtered_data * prevalence_mask
+  
   #################################
   # Filter data based on variance #
   #################################
@@ -1039,6 +1046,10 @@ maaslin_filter_and_standardize <- function(params_and_data_and_formula) {
   logging::loginfo("Filtered feature names from variance filtering: %s",
                    toString(variance_filtered_feature_names))
   filtered_data <- variance_filtered_data
+
+  #######################
+  # Write filtered data #
+  #######################
   
   output <- param_list[["output"]]
   features_folder <- file.path(output, "features")
@@ -1077,13 +1088,6 @@ maaslin_filter_and_standardize <- function(params_and_data_and_formula) {
               "formula" = params_and_data_and_formula[["formula"]]))
 }
 
-maaslin_split_zeros <- function(params_and_data_and_formula) {
-  param_list <- maaslin_parse_param_list(params_and_data_and_formula[["param_list"]])
-  features <- params_and_data_and_formula[["filtered_data"]]
-  
-  
-}
-
 #################
 # Normalization #
 #################
@@ -1092,7 +1096,7 @@ maaslin_normalize = function(params_and_data_and_formula) {
   param_list <- maaslin_parse_param_list(params_and_data_and_formula[["param_list"]])
   features <- params_and_data_and_formula[["filtered_data"]]
   normalization <- param_list[["normalization"]]
-  
+
   logging::loginfo(
     "Running selected normalization method: %s", normalization)
   
@@ -1100,7 +1104,7 @@ maaslin_normalize = function(params_and_data_and_formula) {
   if (normalization == 'CLR') {features <- CLRnorm(features)}
   if (normalization == 'CSS') {features <- CSSnorm(features)}
   if (normalization == 'TMM') {features <- TMMnorm(features)}
-  if (normalization == 'NONE') {features <- features}
+  if (normalization == 'NONE') {features <- NONEnorm(features)}
   
   output <- param_list[["output"]]
   features_folder <- file.path(output, "features")
@@ -1176,18 +1180,26 @@ maaslin_transform = function(params_and_data_and_formula) {
 maaslin_fit = function(params_and_data_and_formula) {
   param_list <- maaslin_parse_param_list(params_and_data_and_formula[["param_list"]])
   analysis_method <- param_list[["analysis_method"]]
+  correction <- param_list[["correction"]]
   
   logging::loginfo(
     "Running selected analysis method: %s", analysis_method)
   
-  fit_data <-
-    fit.data(
+  prevalence_mask <- ifelse(params_and_data_and_formula[["filtered_data"]] > 
+                              param_list[["min_abundance"]], 1, 0)
+  
+  #######################
+  # For non-zero models #
+  #######################
+  
+  fit_data_non_zero <-
+    fit.model(
       params_and_data_and_formula[["filtered_data_norm_transformed"]],
       params_and_data_and_formula[["metadata"]],
       analysis_method,
       formula = params_and_data_and_formula[["formula"]][["formula"]],
       random_effects_formula = params_and_data_and_formula[["formula"]][["random_effects_formula"]],
-      correction = param_list[["correction"]],
+      correction = correction,
       save_models = param_list[["save_models"]],
       cores = param_list[["cores"]]
     )
@@ -1198,20 +1210,57 @@ maaslin_fit = function(params_and_data_and_formula) {
   
   logging::loginfo("Counting total values for each feature")
   
-  fit_data$results$N <-
+  fit_data_non_zero$results$N <-
     apply(
-      fit_data$results,
+      fit_data_non_zero$results,
       1,
       FUN = function(x)
         length(params_and_data_and_formula[["filtered_data_norm_transformed"]][, x[1]])
     )
-  fit_data$results$N.not.zero <-
+  fit_data_non_zero$results$N.not.zero <-
     apply(
-      fit_data$results,
+      fit_data_non_zero$results,
       1,
       FUN = function(x)
         length(which(params_and_data_and_formula[["filtered_data"]][, x[1]] > 0))
     )
+  
+  #####################
+  # For binary models #
+  #####################
+  
+  fit_data_binary <-
+    fit.model(
+      prevalence_mask,
+      params_and_data_and_formula[["metadata"]],
+      'logistic',
+      formula = params_and_data_and_formula[["formula"]][["formula"]],
+      random_effects_formula = params_and_data_and_formula[["formula"]][["random_effects_formula"]],
+      correction = param_list[["correction"]],
+      save_models = param_list[["save_models"]],
+      cores = param_list[["cores"]]
+    )
+
+  logging::loginfo("Counting total values for each feature")
+  
+  fit_data_binary$results$N <-
+    apply(
+      fit_data_binary$results,
+      1,
+      FUN = function(x)
+        length(params_and_data_and_formula[["filtered_data_norm_transformed"]][, x[1]])
+    )
+  fit_data_binary$results$N.not.zero <-
+    apply(
+      fit_data_binary$results,
+      1,
+      FUN = function(x)
+        length(which(params_and_data_and_formula[["filtered_data"]][, x[1]] > 0))
+    )
+  
+  results <- add_joint_signif(fit_data_non_zero, fit_data_binary, analysis_method)
+  fit_data_non_zero$results <- results[[1]]
+  fit_data_binary$results <- results[[2]]
   
   return(list("param_list" = params_and_data_and_formula[["param_list"]], 
               "data" = params_and_data_and_formula[["data"]], 
@@ -1220,7 +1269,8 @@ maaslin_fit = function(params_and_data_and_formula) {
               "filtered_data" = params_and_data_and_formula[["filtered_data"]], 
               "filtered_data_norm_transformed" = params_and_data_and_formula[["filtered_data_norm_transformed"]],
               "formula" = params_and_data_and_formula[["formula"]],
-              "fit_data" = fit_data
+              "fit_data_non_zero" = fit_data_non_zero,
+              "fit_data_binary" = fit_data_binary
               ))
 }
 

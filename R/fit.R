@@ -10,7 +10,7 @@ for (lib in c(
 }
 
 # fit the data using the model selected and applying the correction
-fit.data <-
+fit.model <-
     function(
         features,
         metadata,
@@ -21,14 +21,6 @@ fit.data <-
         save_models = FALSE,
         cores = 1) {
       
-        # set the formula default to all fixed effects if not provided
-        if (is.null(formula))
-            formula <-
-                as.formula(paste(
-                    "expr ~ ", 
-                    paste(colnames(metadata), 
-                    collapse = "+")))
-
         if (is.null(random_effects_formula)) {
           if (is.null(formula)) {
             logging::logerror(
@@ -80,14 +72,53 @@ fit.data <-
                 }
             }
         }
+      
+        ##################
+        # Logistic Model #
+        ##################
+      
+        if (model == "logistic") {
+          if (is.null(random_effects_formula)) {
+            model_function <-
+              function(formula, data, na.action) {
+                return(glm(
+                  formula,
+                  data = data,
+                  family = 'binomial',
+                  na.action = na.action
+                ))
+              }
+            summary_function <- function(fit) {
+              lm_summary <- summary(fit)$coefficients
+              para <- as.data.frame(lm_summary)[-1, -3]
+              para$name <- rownames(lm_summary)[-1]
+              return(para)
+            }
+          } else {
+            ranef_function <- lme4::ranef
+            model_function <-
+              function(formula, data, na.action) {
+                return(lme4::glmer(
+                  formula, 
+                  data = data, 
+                  family = 'binomial',
+                  na.action = na.action))
+              }
+            summary_function <- function(fit) {
+              lm_summary <- coef(summary(fit))
+              para <- as.data.frame(lm_summary)[-1, -3]
+              para$name <- rownames(lm_summary)[-1]
+              return(para)
+            }
+          }
+        }
         
         #######################################
         # Init cluster for parallel computing #
         #######################################
         
         cluster <- NULL
-        if (cores > 1)
-        {
+        if (cores > 1) {
             logging::loginfo("Creating cluster of %s R processes", cores)
             cluster <- parallel::makeCluster(cores)
         }
@@ -109,19 +140,27 @@ fit.data <-
                 dat_sub <-
                     data.frame(expr = as.numeric(featuresVector), metadata)
                 
-                fit <- tryCatch({
+                fit_and_message <- tryCatch({
                     fit1 <-
                         model_function(
                             formula, 
                             data = dat_sub, 
                             na.action = na.exclude)
+                    fit1 <- list(fit1, NA)
                 }, warning = function(w) { 
                   message(paste("Feature", colnames(features)[x], ":", w))
                   logging::logwarn(paste(
                     "Fitting problem for feature", 
                     x, 
                     "a warning was issued"))
-                  return(fit1)
+                  fit1 <-
+                    try({
+                      model_function(
+                        formula, 
+                        data = dat_sub, 
+                        na.action = na.exclude)
+                    })
+                  return(list(fit1, w$message))
                   }, error = function(err) {
                     fit1 <-
                         try({
@@ -130,8 +169,10 @@ fit.data <-
                                 data = dat_sub, 
                                 na.action = na.exclude)
                         })
-                    return(fit1)
+                    return(list(fit1, err$message))
                 })
+                
+                fit <- fit_and_message[[1]]
                 
                 # Gather Output
                 output <- list()
@@ -147,6 +188,8 @@ fit.data <-
                       if (length(l) == 1 & ncol(l[[1]]) == 1 & colnames(l[[1]])[1] == "(Intercept)") {
                         d<-as.vector(unlist(l))
                         names(d)<-unlist(lapply(l, row.names))
+                        d[setdiff(unique(metadata[,names(l)]), names(d))] <- NA
+                        d <- d[order(unique(metadata[,names(l)]))]
                         output$ranef<-d
                       } else {
                         # Otherwise return the random effects list
@@ -159,8 +202,7 @@ fit.data <-
                       output$fit <- NA
                     }
                     
-                }
-                else {
+                } else {
                     logging::logwarn(paste(
                         "Fitting problem for feature", 
                         x, 
@@ -177,6 +219,7 @@ fit.data <-
 
                 colnames(output$para) <- c('coef', 'stderr' , 'pval', 'name')
                 output$para$feature <- colnames(features)[x]
+                output$para$error <- fit_and_message[[2]]
                 
                 return(output)
                 })
@@ -273,6 +316,7 @@ fit.data <-
                 paras,
                 c('feature', 'metadata', 'value'),
                 dplyr::everything())
+        paras$model <- model
         rownames(paras)<-NULL
         
         if (!(is.null(random_effects_formula))) {
@@ -280,5 +324,37 @@ fit.data <-
         } else {
           return(list("results" = paras, "residuals" = residuals, "fitted" = fitted, "ranef" = NULL, "fits" = fits))
         }
-    }        
-          
+    }    
+
+append_joint <- function(outputs, merged_signif) {
+  merged_signif <- merged_signif[,c("feature", "metadata", "value", "name", "pval_joint", "qval_joint")]
+  tmp_colnames <- colnames(outputs$results)
+  tmp_colnames <- case_when(tmp_colnames == "pval" ~ "pval_single",
+                            tmp_colnames == "qval" ~ "qval_single",
+                            TRUE ~ tmp_colnames)
+  colnames(outputs$results) <- tmp_colnames
+
+  merged_signif <- merge(outputs$results, merged_signif, 
+                         by=c("feature", "metadata", "value", "name"))
+  
+  merged_signif <- merged_signif[order(merged_signif$qval_joint),]
+  
+  return(merged_signif)
+}
+  
+# Get joint significance for zeros and non-zeros
+add_joint_signif <- function(fit_data_non_zero, fit_data_binary, analysis_method) {
+  fit_data_binary_signif <- fit_data_binary$results[,c("feature", "metadata", "value", "name", "pval")]
+  colnames(fit_data_binary_signif) <- c("feature", "metadata", "value", "name", analysis_method)
+  fit_data_non_zero_signif <- fit_data_non_zero$results[,c("feature", "metadata", "value", "name", "pval")]
+  colnames(fit_data_non_zero_signif) <- c("feature", "metadata", "value", "name", "logistic")
+  merged_signif <- merge(fit_data_binary_signif, fit_data_non_zero_signif, by=c("feature", "metadata", "value", "name"))
+  merged_signif$pval_joint <- pbeta(pmin(merged_signif[,analysis_method], 
+                                         merged_signif[,"logistic"]), 
+                                    1, 2)
+  merged_signif$qval_joint <- as.numeric(p.adjust(merged_signif$pval_joint, method = correction))
+  return(list(append_joint(fit_data_non_zero, merged_signif), append_joint(fit_data_binary, merged_signif)))
+}
+
+
+
