@@ -309,7 +309,7 @@ TMMnorm = function(features) {
 ######################
 NONEnorm = function(features) {
   X <- as.matrix(features)
-  X_mask <- ifelse(features_norm > 0, 1, 0)
+  X_mask <- ifelse(X > 0, 1, 0)
   features_NONE <- data.frame(ifelse(X_mask > 0, X, NA))
   return(features_NONE)
 }
