@@ -298,3 +298,18 @@ Thanks go to these wonderful people:
 3. Question: When I try to install the R package I see errors about dependencies not being installed. Why is this?
     * Answer: Installing the R package will not automatically install the packages MaAsLin2 requires. Please install the dependencies and then install the MaAsLin2 R package.
 
+
+## Requirements (new) ##
+
+c('dplyr', 'pbapply', 'lmerTest', 'parallel', 'lme4', 'plyr', 'optparse', 'logging', 'data.table', 'ggplot2', 'grid', 'pheatmap')
+
+
+
+
+
+
+
+
+
+
+

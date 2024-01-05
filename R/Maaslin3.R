@@ -898,7 +898,11 @@ maaslin_compute_formula <- function(params_and_data) {
   metadata <- metadata[, effects_names, drop = FALSE]
   
   # create the fixed effects formula text
-  formula_effects <- union(fixed_effects, paste0("group(", group_effects, ")"))
+  if (length(group_effects) > 0) {
+    formula_effects <- union(fixed_effects, paste0("group(", group_effects, ")"))
+  } else {
+    formula_effects <- fixed_effects
+  }
   formula_text <-
     paste("expr ~ ", paste(formula_effects, collapse = " + "))
   logging::loginfo("Formula for fixed effects: %s", formula_text)
