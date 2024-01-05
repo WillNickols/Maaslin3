@@ -1463,6 +1463,13 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     outputs$fit_data_binary$results <- rbind(growing_results_mat2, outputs_tmp$fit_data_binary$results)
     outputs$fit_data_binary$results <- outputs$fit_data_binary$results[order(outputs$fit_data_binary$results$qval_joint),]
     
+    if (is.null(dim(growing_resid_mat))) { # Not a matrix because only a single association was significant
+      growing_resid_mat <- t(as.matrix(growing_resid_mat))
+      growing_resid_mat2 <- t(as.matrix(growing_resid_mat2))
+      growing_fitted_mat <- t(as.matrix(growing_fitted_mat))
+      growing_fitted_mat2 <- t(as.matrix(growing_fitted_mat2))
+    }
+    
     rownames(growing_resid_mat) = rownames(growing_resid_mat2) = rownames(growing_fitted_mat) = 
       rownames(growing_fitted_mat2) <- drop_vec
     
