@@ -1369,21 +1369,27 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
   outputs$fit_data_non_zero$results$controlled_for <- ""
   outputs$fit_data_binary$results$controlled_for <- ""
   
-  # Pull the lowest q-value
-  feature_lowest_q <- outputs$fit_data_non_zero$results$feature[
-    which.min(outputs$fit_data_non_zero$results$qval_joint)]
-  tmp_line <- outputs$fit_data_non_zero$results[
-    outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
-  tmp_line2 <- outputs$fit_data_binary$results[
-    outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
+  # Pull the most impactful feature with a significant q-value
   max_significance <- params_and_data_and_formula[["param_list"]]$max_significance
+  signif_current <- rbind(outputs$fit_data_non_zero$results[outputs$fit_data_non_zero$results$qval_joint < max_significance, c("feature", "coef", "qval_single")],
+                          outputs$fit_data_binary$results[outputs$fit_data_binary$results$qval_joint < max_significance, c("feature", "coef", "qval_single")])
+  signif_current <- signif_current[signif_current$qval_single < max_significance,]
   
-  tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
-  tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
+  if (nrow(signif_current) > 0) {
+    feature_lowest_q <- signif_current$feature[which.max(abs(signif_current$coef))]
+    
+    tmp_line <- outputs$fit_data_non_zero$results[
+      outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
+    tmp_line2 <- outputs$fit_data_binary$results[
+      outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
+    
+    tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
+    tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
+    
+    tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
+    tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
+  }
   
-  tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
-  tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
-
   # Create a matrix of the low q-value removed features
   drop_vec <- c()
   growing_results_mat <- NULL
@@ -1392,7 +1398,7 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
   growing_resid_mat2 <- NULL
   growing_fitted_mat <- NULL
   growing_fitted_mat2 <- NULL
-  while(length(tmp_line$qval_joint) > 0 & min(tmp_line$qval_joint) < max_significance) {
+  while(length(tmp_line$qval_joint) > 0 & nrow(signif_current) > 0) {
     drop_vec <- c(drop_vec, feature_lowest_q)
     
     # Remove the feature from the dataframe and refit
@@ -1400,6 +1406,7 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     
     # Check there are at least 2 taxa remaining
     if (sum(!(colnames(params_and_data_and_formula_tmp[["data"]]) %in% drop_vec)) < 2) {
+      drop_vec <- drop_vec[-length(drop_vec)]
       break
     }
     
@@ -1419,6 +1426,7 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     
     # Make sure there are at least 2 taxa remaining
     if (ncol(intermediate_params[["filtered_data_norm_transformed"]]) < 2) {
+      drop_vec <- drop_vec[-length(drop_vec)]
       break
     }
     
@@ -1444,16 +1452,20 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     outputs_tmp$fit_data_non_zero$results$controlled_for <- paste0(drop_vec, collapse = ",")
     outputs_tmp$fit_data_binary$results$controlled_for <- paste0(drop_vec, collapse = ",")
     
-    feature_lowest_q <- outputs_tmp$fit_data_non_zero$results$feature[
-      which.min(outputs_tmp$fit_data_non_zero$results$qval_joint)]
-    tmp_line <- outputs_tmp$fit_data_non_zero$results[
-      outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
-    tmp_line2 <- outputs_tmp$fit_data_binary$results[
-      outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
-    tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
-    tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
-    tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
-    tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
+    signif_current <- rbind(outputs_tmp$fit_data_non_zero$results[outputs_tmp$fit_data_non_zero$results$qval_joint < max_significance, c("feature", "coef", "qval_single")],
+                            outputs_tmp$fit_data_binary$results[outputs_tmp$fit_data_binary$results$qval_joint < max_significance, c("feature", "coef", "qval_single")])
+    signif_current <- signif_current[signif_current$qval_single < max_significance,]
+    if (nrow(signif_current) > 0) {
+      feature_lowest_q <- signif_current$feature[which.max(abs(signif_current$coef))]
+      tmp_line <- outputs_tmp$fit_data_non_zero$results[
+        outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
+      tmp_line2 <- outputs_tmp$fit_data_binary$results[
+        outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
+      tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
+      tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
+      tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
+      tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
+    }
   }
 
   # Add significant features
