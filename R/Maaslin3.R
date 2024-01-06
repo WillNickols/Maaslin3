@@ -1388,6 +1388,8 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     
     tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
     tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
+  } else {
+    tmp_line <- NULL
   }
   
   # Create a matrix of the low q-value removed features
@@ -1398,7 +1400,7 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
   growing_resid_mat2 <- NULL
   growing_fitted_mat <- NULL
   growing_fitted_mat2 <- NULL
-  while(length(tmp_line$qval_joint) > 0 & nrow(signif_current) > 0) {
+  while(nrow(signif_current) > 0 & length(tmp_line$qval_joint) > 0) {
     drop_vec <- c(drop_vec, feature_lowest_q)
     
     # Remove the feature from the dataframe and refit
