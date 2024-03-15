@@ -1,8 +1,8 @@
 
 
-# MaAsLin2 User Manual #
+# MaAsLin 3 User Manual #
 
-MaAsLin2 is the next generation of MaAsLin (Microbiome Multivariable Association with Linear Models).
+MaAsLin 3 is the next generation of MaAsLin (Microbiome Multivariable Association with Linear Models). All files except those in the `R` directory have not been updated from MaAsLin 2.
 
 [MaAsLin2](http://huttenhower.sph.harvard.edu/maaslin2) is comprehensive R package for efficiently determining multivariable association between clinical metadata and microbial meta-omics features. MaAsLin2 relies on general linear models to accommodate most modern epidemiological study designs, including cross-sectional and longitudinal, along with a variety of filtering, normalization, and transform methods.
 
@@ -97,6 +97,12 @@ MaAsLin2 requires two input files.
     * Formatted with features as columns and samples as rows.
     * The transpose of this format is also okay.
     * Possible metadata in this file include gender or age.
+(3). Spike-in file
+    * This file is tab-delimited.
+    * One column of abundances (total or reference feature) and samples as rows.
+    * If the abundance is a reference feature, the column name should be the same as the feature
+    * Otherwise, the column name should be 'total'
+    * If all reference spike-ins were the same, the column should be all 1s.
 
 The data file can contain samples not included in the metadata file
 (along with the reverse case). For both cases, those samples not 

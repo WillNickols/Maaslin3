@@ -307,11 +307,56 @@ TMMnorm = function(features) {
 ######################
 # NONE Normalization #
 ######################
+
 NONEnorm = function(features) {
   X <- as.matrix(features)
   X_mask <- ifelse(X > 0, 1, 0)
   features_NONE <- data.frame(ifelse(X_mask > 0, X, NA))
   return(features_NONE)
+}
+
+##########################
+# Unscaled Normalization #
+##########################
+
+UNSCALEDnorm = function(features, abs_abundances) {
+  # Convert to Matrix from Data Frame
+  if (colnames(abs_abundances) == 'total') {
+    X_mask <- ifelse(features > 0, 1, 0)
+    abs_mult_fact <- abs_abundances[rownames(features),1]
+  } else {
+    abs_feature <- colnames(abs_abundances)
+    X_mask <- ifelse(features[,colnames(features) != abs_feature] > 0, 1, 0)
+    abs_mult_fact <- abs_abundances[rownames(features),1] / features[,abs_feature]
+    features <- features[,colnames(features) != abs_feature]
+  }
+  
+  features_norm = as.matrix(features)
+  dd <- colnames(features_norm)
+  x <- as.matrix(features_norm)
+  
+  MARGIN <- 1
+  
+  x <- sweep(x, MARGIN, abs_mult_fact, "*")
+  attr <- list(total = abs_mult_fact, margin = MARGIN)
+  if (any(is.nan(x))) 
+    warning("result contains NaN, perhaps due to impossible mathematical\n
+            operation\n")
+  
+  if (any(is.infinite(x))) 
+    warning("result contains Inf, perhaps due to impossible mathematical\n
+            operation\n")
+  
+  x <- ifelse(X_mask, x, NA)
+  
+  # Convert back to data frame
+  features_ABS <- as.data.frame(x)
+  
+  # Rename the features - Same Format as Before
+  colnames(features_ABS) <- dd
+  
+  # Return
+  return(features_ABS)
 }
 
 #######################################

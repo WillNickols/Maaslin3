@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 ###############################################################################
-# MaAsLin3
+# MaAsLin 3
 
 # Copyright (c) 2024 Harvard School of Public Health
 
@@ -89,6 +89,8 @@ args$transform <- transform_choices[1]
 args$analysis_method <- analysis_method_choices_names[1]
 args$random_effects <- NULL
 args$group_effects <- NULL
+args$gomp_effects <- NULL
+args$omp_effects <- NULL
 args$fixed_effects <- NULL
 args$formula <- NULL
 args$correction <- correction_choices[1]
@@ -102,6 +104,7 @@ args$save_scatter <- FALSE
 args$cores <- 1
 args$save_models <- FALSE
 args$augment <- FALSE
+args$unscaled_abundance <- NULL
 args$reference <- NULL
 
 ##############################
@@ -233,6 +236,30 @@ options <-
     dest = "group_effects",
     default = args$group_effects,
     help = paste("The group effects for the model, ",
+                 "comma-delimited for multiple effects",
+                 "[ Default: none ]"
+    )
+  )
+options <-
+  optparse::add_option(
+    options,
+    c("--gomp_effects"),
+    type = "character",
+    dest = "gomp_effects",
+    default = args$gomp_effects,
+    help = paste("The gomp effects for the model, ",
+                 "comma-delimited for multiple effects",
+                 "[ Default: none ]"
+    )
+  )
+options <-
+  optparse::add_option(
+    options,
+    c("--omp_effects"),
+    type = "character",
+    dest = "omp_effects",
+    default = args$omp_effects,
+    help = paste("The omp effects for the model, ",
                  "comma-delimited for multiple effects",
                  "[ Default: none ]"
     )
@@ -379,6 +406,19 @@ options <-
     )
   )
 options <-
+  optparse::add_option(
+    options,
+    c("--unscaled_abundance"),
+    type = "character",
+    dest = "unscaled_abundance",
+    default = args$unscaled_abundance,
+    help = paste("The table to use as an unscaled",
+                 "abundance reference (the single column",
+                 "name must be the same as one of the",
+                 "features or 'total'"
+    )
+  )
+options <-
     optparse::add_option(
         options,
         c("-d", "--reference"),
@@ -409,12 +449,14 @@ maaslin_parse_param_list <- function(param_list) {
                         zero_threshold = args$zero_threshold,
                         min_prevalence = args$min_prevalence,
                         min_variance = args$min_variance,
-                        normalization = args$normalization,
+                        normalization = args$normalization, # ifelse(is.null(param_list[['unscaled_abundance']]), args$normalization, 'TSS'),
                         transform = args$transform,
                         analysis_method = args$analysis_method,
                         max_significance = args$max_significance,
                         random_effects = args$random_effects,
                         group_effects = args$group_effects,
+                        gomp_effects = args$gomp_effects,
+                        omp_effects = args$omp_effects,
                         fixed_effects = args$fixed_effects,
                         formula = args$formula,
                         correction = args$correction,
@@ -428,6 +470,7 @@ maaslin_parse_param_list <- function(param_list) {
                         save_scatter = args$save_scatter,
                         save_models = args$save_models,
                         augment = args$augment,
+                        unscaled_abundance = args$unscaled_abundance,
                         reference = args$reference)
   
   missing_params <- setdiff(names(default_params), names(param_list))
@@ -463,6 +506,20 @@ maaslin_check_arguments <- function(param_list) {
         "Please select a normalization",
         "from the list of available options"),
       toString(normalization_choices)
+    )
+  }
+  
+  if (!is.null(param_list[['unscaled_abundance']]) & param_list[["normalization"]] != 'TSS') {
+    stop(
+      paste(
+        "Normalization must be TSS if using unscaled abundance")
+    )
+  }
+  
+  if (!is.null(param_list[['unscaled_abundance']]) & param_list[["iterative_mode"]]) {
+    stop(
+      paste(
+        "Iterative mode should not be run with unscaled abundances")
     )
   }
   
@@ -566,11 +623,18 @@ maaslin_log_arguments <- function(param_list) {
   logging::logdebug("Max significance: %f", param_list[["max_significance"]])
   logging::logdebug("Random effects: %s", param_list[["random_effects"]])
   logging::logdebug("Group effects: %s", param_list[["group_effects"]])
+  logging::logdebug("Gomp effects: %s", param_list[["gomp_effects"]])
+  logging::logdebug("Omp effects: %s", param_list[["omp_effects"]])
   logging::logdebug("Fixed effects: %s", param_list[["fixed_effects"]])
   logging::logdebug("Formula: %s", param_list[["formula"]])
   logging::logdebug("Correction method: %s", param_list[["correction"]])
   logging::logdebug("Standardize: %s", param_list[["standardize"]])
   logging::logdebug("Cores: %d", param_list[["cores"]])
+  logging::logdebug("Iterative mode: %s", param_list[["iterative_mode"]])
+  logging::logdebug("Augment: %s", param_list[["augment"]])
+  if (is.character(param_list[["unscaled_abundance"]])) {
+    logging::logdebug("Unscaled abundance: %s", param_list[["unscaled_abundance"]])
+  }
   
   maaslin_check_arguments(param_list)
   
@@ -585,6 +649,7 @@ maaslin_read_data <- function(param_list) {
   param_list <- maaslin_parse_param_list(param_list)
   input_data <- param_list[["input_data"]]
   input_metadata <- param_list[["input_metadata"]]
+  unscaled_abundance <- param_list[["unscaled_abundance"]]
   
   # if a character string then this is a file name, else it 
   # is a data frame
@@ -627,6 +692,23 @@ maaslin_read_data <- function(param_list) {
   } else {
     stop("input_metadata is neither a file nor a data frame!")
   }
+  
+  if (is.character(unscaled_abundance) && file.exists(unscaled_abundance)) {
+    unscaled_abundance <-
+      data.frame(data.table::fread(
+        unscaled_abundance, header = TRUE, sep = "\t"),
+        row.names = 1)
+  } else if (is.data.frame(unscaled_abundance)) {
+    if (!tibble::has_rownames(unscaled_abundance)) {
+      stop("If supplying unscaled_abundance as a data frame, it must have appropriate rownames!")
+    }
+    unscaled_abundance <- as.data.frame(unscaled_abundance) # in case it's a tibble or something
+  } else if (!is.null(unscaled_abundance)) {
+    stop("unscaled_abundance is not a file or data frame!")
+  }
+  
+  param_list[["unscaled_abundance"]] <- unscaled_abundance
+  
   return(list("param_list" = param_list, 
               "data" = data, 
               "metadata" = metadata))
@@ -640,6 +722,7 @@ maaslin_reorder_data <- function(params_and_data) {
   param_list <- maaslin_parse_param_list(params_and_data[["param_list"]])
   data <- params_and_data[["data"]]
   metadata <- params_and_data[["metadata"]]
+  unscaled_abundance <- param_list[["unscaled_abundance"]]
   
   logging::loginfo("Determining format of input files")
   samples_row_row <- intersect(rownames(data), rownames(metadata))
@@ -747,6 +830,18 @@ maaslin_reorder_data <- function(params_and_data) {
       paste(extra_metadata_samples, collapse = ",")
     )
   
+  if (!is.null(unscaled_abundance)) {
+    extra_unscaled_abundance_samples <-
+      setdiff(rownames(unscaled_abundance), rownames(data))
+    if (length(extra_unscaled_abundance_samples) > 0)
+      logging::logdebug(
+        paste("The following samples were found",
+              "to have unscaled abundances but no features.",
+              "They will be removed. %s"),
+        paste(extra_unscaled_abundance_samples, collapse = ",")
+      )
+  }
+  
   # get a set of the samples with both metadata and features
   intersect_samples <- intersect(rownames(data), rownames(metadata))
   logging::logdebug(
@@ -754,11 +849,35 @@ maaslin_reorder_data <- function(params_and_data) {
     length(intersect_samples)
   )
   
+  if (is.null(unscaled_abundance)) {
+    NULL # Do nothing if no unscaled abundance data
+  } else {
+    if (!all(rownames(data) %in% rownames(unscaled_abundance))) {
+      stop("some data samples do not have an unscaled abundance")
+    } else if (length(colnames(unscaled_abundance)) > 1) {
+      stop("there is more than 1 column in the unscaled abundance data frame")
+    } else if (colnames(unscaled_abundance) %in% colnames(data)) {
+      logging::logdebug(
+        "Using unscaled abundance as spike-in feature"
+      )
+    } else if (colnames(unscaled_abundance) == 'total') {
+      logging::logdebug(
+        "Using spike-ins as total abundances"
+      )
+    } else {
+      stop("unscaled abundance column must be a feature name or 'total'")
+    }
+  }
+  
   # now order both data and metadata with the same sample ordering
   logging::logdebug(
     "Reordering data/metadata to use same sample ordering")
   data <- data[intersect_samples, , drop = FALSE]
   metadata <- metadata[intersect_samples, , drop = FALSE]
+  if (!is.null(unscaled_abundance)) {
+    unscaled_abundance <- unscaled_abundance[intersect_samples, , drop = FALSE]
+  }
+  param_list[["unscaled_abundance"]] <- unscaled_abundance
   
   return(list("param_list" = param_list, 
               "data" = data, 
@@ -776,14 +895,18 @@ maaslin_compute_formula <- function(params_and_data) {
   
   fixed_effects <- param_list[["fixed_effects"]]
   group_effects <- param_list[["group_effects"]]
+  gomp_effects <- param_list[["gomp_effects"]]
+  omp_effects <- param_list[["omp_effects"]]
   random_effects <- param_list[["random_effects"]]
   
   if (!is.null(param_list[["formula"]])) {
     if (!is.null(param_list[["fixed_effects"]]) | 
          !is.null(param_list[["random_effects"]]) |
-        !is.null(param_list[["group_effects"]])) {
+        !is.null(param_list[["group_effects"]]) | 
+        !is.null(param_list[["gomp_effects"]]) |
+        !is.null(param_list[["omp_effects"]])) {
       logging::logwarn(
-        paste("fixed_effects, random_effects, or group_effects provided in addition to formula,", 
+        paste("fixed_effects, random_effects, group_effects, gomp_effects, or omp_effects provided in addition to formula,", 
               "using fixed_effects and random_effects"))
     } else {
       logging::logwarn(
@@ -863,46 +986,55 @@ maaslin_compute_formula <- function(params_and_data) {
     }
   }
   
-  if (!is.null(group_effects)) {
-    group_effects <-
-      unlist(strsplit(group_effects, ",", fixed = TRUE))
-    
-    common_variables <- intersect(fixed_effects, group_effects)
+  if (!is.null(group_effects) | !is.null(gomp_effects) | !is.null(omp_effects)) {
+    multi_effects <- c()
+    if (!is.null(group_effects)) {
+      multi_effects <- c(multi_effects, strsplit(group_effects, ",", fixed = TRUE))
+    }
+    if (!is.null(gomp_effects)) {
+      multi_effects <- c(multi_effects, strsplit(gomp_effects, ",", fixed = TRUE))
+    }
+    if (!is.null(omp_effects)) {
+      multi_effects <- c(multi_effects, strsplit(omp_effects, ",", fixed = TRUE))
+    }
+
+    common_variables <- intersect(fixed_effects, multi_effects)
     if (length(common_variables) > 0) {
       logging::logwarn(
-        paste("Feature name included as fixed and group effect,",
+        paste("Feature name included as fixed and group/gomp/omp effect,",
               "check that this is intended: %s"),
         paste(common_variables, collapse = " , ")
       )
     }
     
     # remove any random effects not found in metadata
-    to_remove <- setdiff(group_effects, colnames(metadata))
+    to_remove <- setdiff(multi_effects, colnames(metadata))
     if (length(to_remove) > 0) {
-      logging::logwarn(
-        paste("Feature name not found in metadata",
-              "so not applied to formula as random effect: %s"),
-        paste(to_remove, collapse = " , ")
-      )
-      group_effects <- setdiff(group_effects, to_remove)
+      stop(paste0("Feature name not found in metadata:", paste0(to_remove, collapse = ", ")))
     }
   }
   
-  if (length(fixed_effects) == 0 & length(group_effects) == 0) {
-    logging::logerror("No fixed or group effects provided.")
+  if (length(fixed_effects) == 0 & length(group_effects) == 0 & length(gomp_effects) == 0 & length(omp_effects) == 0) {
+    logging::logerror("No fixed/group/gomp/omp effects provided.")
     stop()
   }
   
   # reduce metadata to only include fixed/group/random effects in formula
-  effects_names <- union(union(fixed_effects, random_effects), group_effects)
+  effects_names <- unique(c(fixed_effects, random_effects, group_effects, gomp_effects, omp_effects))
   metadata <- metadata[, effects_names, drop = FALSE]
   
   # create the fixed effects formula text
+  formula_effects <- fixed_effects
   if (length(group_effects) > 0) {
-    formula_effects <- union(fixed_effects, paste0("group(", group_effects, ")"))
-  } else {
-    formula_effects <- fixed_effects
+    formula_effects <- union(formula_effects, paste0("group(", group_effects, ")"))
   }
+  if (length(gomp_effects) > 0) {
+    formula_effects <- union(formula_effects, paste0("gomp(", gomp_effects, ")"))
+  }
+  if (length(omp_effects) > 0) {
+    formula_effects <- union(formula_effects, paste0("omp(", omp_effects, ")"))
+  }
+  
   formula_text <-
     paste("expr ~ ", paste(formula_effects, collapse = " + "))
   logging::loginfo("Formula for fixed effects: %s", formula_text)
@@ -957,9 +1089,13 @@ maaslin_check_formula <- function(params_and_data) {
     return(maaslin_compute_formula(params_and_data))
   }
   
-  if (!is.null(param_list[["fixed_effects"]]) | !is.null(param_list[["random_effects"]]) | !is.null(param_list[["group_effects"]])) {
+  if (!is.null(param_list[["fixed_effects"]]) | 
+      !is.null(param_list[["random_effects"]]) | 
+      !is.null(param_list[["group_effects"]]) | 
+      !is.null(param_list[["gomp_effects"]]) | 
+      !is.null(param_list[["omp_effects"]])) {
     logging::logwarn(
-      paste("fixed_effects, random_effects, or group_effects provided in addition to formula,", 
+      paste("fixed_effects, random_effects, group_effects, gomp_effects, omp_effects provided in addition to formula,", 
             "using only formula"))
   }
   
@@ -1188,6 +1324,10 @@ maaslin_normalize = function(params_and_data_and_formula) {
   if (normalization == 'TMM') {features <- TMMnorm(features)}
   if (normalization == 'NONE') {features <- NONEnorm(features)}
   
+  if (!is.null(param_list[['unscaled_abundance']])) {
+    features <- UNSCALEDnorm(features, param_list[['unscaled_abundance']])
+  }
+  
   output <- param_list[["output"]]
   features_folder <- file.path(output, "features")
   if (!file.exists(features_folder)) {
@@ -1209,7 +1349,7 @@ maaslin_normalize = function(params_and_data_and_formula) {
               "data" = params_and_data_and_formula[["data"]], 
               "metadata" = params_and_data_and_formula[["metadata"]],
               "unfiltered_metadata" = params_and_data_and_formula[["unfiltered_metadata"]], 
-              "filtered_data" = params_and_data_and_formula[["filtered_data"]], 
+              "filtered_data" = params_and_data_and_formula[["filtered_data"]][,colnames(features)], 
               "filtered_data_norm" = features,
               "formula" = params_and_data_and_formula[["formula"]]))
 }
@@ -1358,6 +1498,76 @@ maaslin_fit = function(params_and_data_and_formula) {
               ))
 }
 
+maaslin_fit_abun_only = function(params_and_data_and_formula) {
+  param_list <- maaslin_parse_param_list(params_and_data_and_formula[["param_list"]])
+  analysis_method <- param_list[["analysis_method"]]
+  correction <- param_list[["correction"]]
+  fit_data_binary <- params_and_data_and_formula[["fit_data_binary"]]
+  
+  logging::loginfo(
+    "Running selected analysis method: %s", analysis_method)
+  
+  prevalence_mask <- ifelse(params_and_data_and_formula[["filtered_data"]] > 
+                              param_list[["zero_threshold"]], 1, 0)
+  
+  #######################
+  # For non-zero models #
+  #######################
+  
+  fit_data_non_zero <-
+    fit.model(
+      features = params_and_data_and_formula[["filtered_data_norm_transformed"]],
+      metadata = params_and_data_and_formula[["metadata"]],
+      model = analysis_method,
+      formula = params_and_data_and_formula[["formula"]][["formula"]],
+      random_effects_formula = params_and_data_and_formula[["formula"]][["random_effects_formula"]],
+      correction = correction,
+      save_models = param_list[["save_models"]],
+      augment = param_list[["augment"]],
+      cores = param_list[["cores"]]
+    )
+  
+  #################################################################
+  # Count the total values for each feature (untransformed space) #
+  #################################################################
+  
+  logging::loginfo("Counting total values for each feature")
+  
+  fit_data_non_zero$results$N <-
+    apply(
+      fit_data_non_zero$results,
+      1,
+      FUN = function(x)
+        length(params_and_data_and_formula[["filtered_data_norm_transformed"]][, x[1]])
+    )
+  fit_data_non_zero$results$N.not.zero <-
+    apply(
+      fit_data_non_zero$results,
+      1,
+      FUN = function(x)
+        length(which(params_and_data_and_formula[["filtered_data"]][, x[1]] > 0))
+    )
+  
+  fit_data_binary$results <- fit_data_binary$results[,!colnames(fit_data_binary$results) %in% c("pval_joint", "qval_joint", "controlled_for")]
+  colnames(fit_data_binary$results)[colnames(fit_data_binary$results) == 'pval_single'] <- 'pval'
+  colnames(fit_data_binary$results)[colnames(fit_data_binary$results) == 'qval_single'] <- 'qval'
+  results <- add_joint_signif(fit_data_non_zero, fit_data_binary, analysis_method, correction)
+  fit_data_non_zero$results <- results[[1]]
+  fit_data_binary$results <- results[[2]]
+  
+  return(list("param_list" = params_and_data_and_formula[["param_list"]], 
+              "data" = params_and_data_and_formula[["data"]], 
+              "metadata" = params_and_data_and_formula[["metadata"]],
+              "unfiltered_metadata" = params_and_data_and_formula[["unfiltered_metadata"]], 
+              "filtered_data" = params_and_data_and_formula[["filtered_data"]], 
+              "filtered_data_norm_transformed" = params_and_data_and_formula[["filtered_data_norm_transformed"]],
+              "formula" = params_and_data_and_formula[["formula"]],
+              "fit_data_non_zero" = fit_data_non_zero,
+              "fit_data_binary" = fit_data_binary
+  ))
+}
+
+
 ########################################################
 # Fit and drop terms to remove compositionality effect #
 ########################################################
@@ -1366,8 +1576,11 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
 
   # Get the original fit
   outputs <- maaslin_fit(params_and_data_and_formula)
+
   outputs$fit_data_non_zero$results$controlled_for <- ""
   outputs$fit_data_binary$results$controlled_for <- ""
+  
+  stored_binary_results <- outputs$fit_data_binary
   
   # Pull the most impactful feature with a significant q-value
   max_significance <- params_and_data_and_formula[["param_list"]]$max_significance
@@ -1381,7 +1594,7 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     tmp_line <- outputs$fit_data_non_zero$results[
       outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
     tmp_line2 <- outputs$fit_data_binary$results[
-      outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
+      outputs$fit_data_binary$results$feature == feature_lowest_q,]
     
     tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
     tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
@@ -1449,10 +1662,19 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
       growing_fitted_mat2 <- rbind(growing_fitted_mat2, tmp_fitted2)
     }
     
-    outputs_tmp <- maaslin_fit(intermediate_params)
+    stored_binary_results$results <- stored_binary_results$results[
+      stored_binary_results$results$feature != feature_lowest_q, , drop=F]
+    stored_binary_results$residuals <- stored_binary_results$residuals[
+      rownames(stored_binary_results$residuals) != feature_lowest_q, , drop=F]
+    stored_binary_results$fitted <- stored_binary_results$fitted[
+      rownames(stored_binary_results$fitted) != feature_lowest_q, , drop=F]
+    intermediate_params[['fit_data_binary']] <- stored_binary_results
+    outputs_tmp <- maaslin_fit_abun_only(intermediate_params)
     
     outputs_tmp$fit_data_non_zero$results$controlled_for <- paste0(drop_vec, collapse = ",")
     outputs_tmp$fit_data_binary$results$controlled_for <- paste0(drop_vec, collapse = ",")
+    
+    stored_binary_results <- outputs_tmp$fit_data_binary
     
     signif_current <- rbind(outputs_tmp$fit_data_non_zero$results[outputs_tmp$fit_data_non_zero$results$qval_joint < max_significance, c("feature", "coef", "qval_single")],
                             outputs_tmp$fit_data_binary$results[outputs_tmp$fit_data_binary$results$qval_joint < max_significance, c("feature", "coef", "qval_single")])
@@ -1462,11 +1684,11 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
       tmp_line <- outputs_tmp$fit_data_non_zero$results[
         outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
       tmp_line2 <- outputs_tmp$fit_data_binary$results[
-        outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
-      tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
-      tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
-      tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
-      tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
+        outputs_tmp$fit_data_binary$results$feature == feature_lowest_q,]
+      tmp_resid <- outputs_tmp$fit_data_non_zero$residuals[feature_lowest_q,]
+      tmp_resid2 <- outputs_tmp$fit_data_binary$residuals[feature_lowest_q,]
+      tmp_fitted <- outputs_tmp$fit_data_non_zero$fitted[feature_lowest_q,]
+      tmp_fitted2 <- outputs_tmp$fit_data_binary$fitted[feature_lowest_q,]
     }
   }
 
@@ -1605,17 +1827,16 @@ Maaslin3 <- function(param_list = list()) {
       maaslin_check_formula()
   }
   
+  params_and_data_and_formula <- params_tmp_2 %>%
+    maaslin_filter_and_standardize() %>%
+    maaslin_normalize() %>%
+    maaslin_transform()
+  
   if (params_tmp_2[['param_list']][['iterative_mode']]) {
-    params_data_formula_fit <- params_tmp_2 %>%
-      maaslin_filter_and_standardize() %>%
-      maaslin_normalize() %>%
-      maaslin_transform() %>%
+    params_data_formula_fit <- params_and_data_and_formula %>%
       maaslin_fit_iterative()
   } else {
-    params_data_formula_fit <- params_tmp_2 %>%
-      maaslin_filter_and_standardize() %>%
-      maaslin_normalize() %>%
-      maaslin_transform() %>%
+    params_data_formula_fit <- params_and_data_and_formula %>%
       maaslin_fit()
   }
   
@@ -1674,3 +1895,5 @@ if (identical(environment(), globalenv()) &&
       current_args$reference
     ))
 }
+
+
