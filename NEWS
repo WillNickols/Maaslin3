@@ -1,3 +1,12 @@
+Changes in version 3.0.0 (15-03-2024):
+* Updated dependencies
+* Modularized previous code
+* Added prevalence/logistic models
+* Added data augmentation for logistic models
+* Added iterative renormalization for compositionally
+* Added spike-in references for compositionally
+* Added group, OMP, and GOMP models
+
 Changes in version 1.7.3 (11-02-2021):
 * Update sourcing R scripts 
 * Update reference level handling
