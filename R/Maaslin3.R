@@ -1567,7 +1567,6 @@ maaslin_fit_abun_only = function(params_and_data_and_formula) {
   ))
 }
 
-
 ########################################################
 # Fit and drop terms to remove compositionality effect #
 ########################################################
@@ -1765,48 +1764,55 @@ maaslin_plot_results <- function(params_data_formula_fit) {
     }
   }
   
+  fit_out_lm <- params_data_formula_fit$fit_data_non_zero$results
+  fit_out_lm <- fit_out_lm[c("feature", "value", "metadata", "coef", "pval_single", "error", "qval_single", "pval_joint", "qval_joint")]
+  fit_out_lm$association <- "abundance"
+  
+  fit_out_binary <- params_data_formula_fit$fit_data_binary$results
+  fit_out_binary <- fit_out_binary[c("feature", "value", "metadata", "coef", "pval_single", "error", "qval_single", "pval_joint", "qval_joint")]
+  fit_out_binary$association <- "prevalence"
+  
+  fit_out <- full_join(fit_out_lm, fit_out_binary, by = colnames(fit_out_lm))
+  
   if (param_list[["plot_heatmap"]]) {
     heatmap_file <- file.path(output, "heatmap.pdf")
     logging::loginfo(
       "Writing heatmap of significant results to file: %s",
       heatmap_file)
-    significant_results_file <-
-      file.path(output, "significant_results.tsv")
-    save_heatmap(significant_results_file, heatmap_file, figures_folder,
-                 first_n = param_list[["heatmap_first_n"]])
+    save_heatmap(fit_out, heatmap_file, figures_folder,
+                 first_n = param_list[["heatmap_first_n"]],
+                 max_significance = param_list[['max_significance']])
   }
   
-  if (param_list[["plot_scatter"]]) {
-    logging::loginfo(
-      paste("Writing association plots",
-            "(one for each significant association)",
-            "to output folder: %s"),
-      output
-    )
-    significant_results_file <-
-      file.path(output, "significant_results.tsv")
-    saved_plots <- maaslin2_association_plots(
-      params_data_formula_fit[["unfiltered_metadata"]],
-      params_data_formula_fit[["filtered_data"]],
-      significant_results_file,
-      output,
-      figures_folder,
-      param_list[["max_pngs"]],
-      param_list[["save_scatter"]])
-    if (param_list[["save_scatter"]]) {
-      scatter_file <- file.path(figures_folder, "scatter_plots.rds")
-      # remove plots file if already exists
-      if (file.exists(scatter_file)) {
-        logging::logwarn(
-          "Deleting existing scatter plot objects file: %s", scatter_file)
-        unlink(scatter_file)
-      }
-      logging::loginfo("Writing scatter plot objects to file %s", scatter_file)
-      saveRDS(saved_plots, file = scatter_file)   
-    }
-  }
-  
-  return(params_data_formula_fit)
+  # if (param_list[["plot_scatter"]]) {
+  #   logging::loginfo(
+  #     paste("Writing association plots",
+  #           "(one for each significant association)",
+  #           "to output folder: %s"),
+  #     output
+  #   )
+  #   significant_results_file <-
+  #     file.path(output, "significant_results.tsv")
+  #   saved_plots <- maaslin2_association_plots(
+  #     params_data_formula_fit[["unfiltered_metadata"]],
+  #     params_data_formula_fit[["filtered_data"]],
+  #     significant_results_file,
+  #     output,
+  #     figures_folder,
+  #     param_list[["max_pngs"]],
+  #     param_list[["save_scatter"]])
+  #   if (param_list[["save_scatter"]]) {
+  #     scatter_file <- file.path(figures_folder, "scatter_plots.rds")
+  #     # remove plots file if already exists
+  #     if (file.exists(scatter_file)) {
+  #       logging::logwarn(
+  #         "Deleting existing scatter plot objects file: %s", scatter_file)
+  #       unlink(scatter_file)
+  #     }
+  #     logging::loginfo("Writing scatter plot objects to file %s", scatter_file)
+  #     saveRDS(saved_plots, file = scatter_file)   
+  #   }
+  # }
 }
 
 #######################################################
@@ -1839,6 +1845,8 @@ Maaslin3 <- function(param_list = list()) {
     params_data_formula_fit <- params_and_data_and_formula %>%
       maaslin_fit()
   }
+  
+  maaslin_plot_results(params_data_formula_fit)
   
   return(params_data_formula_fit)
 }

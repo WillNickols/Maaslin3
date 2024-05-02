@@ -1,4 +1,4 @@
-Changes in version 3.0.0 (15-03-2024):
+Changes in version 3.0.0 (03-15-2024):
 * Updated dependencies
 * Modularized previous code
 * Added prevalence/logistic models

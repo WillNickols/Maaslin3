@@ -18,6 +18,6 @@ Suggests:
     markdown
 VignetteBuilder: knitr
 Collate: fit.R utility_scripts.R viz.R  Maaslin3.R
-URL: http://huttenhower.sph.harvard.edu/maaslin2
+URL: http://huttenhower.sph.harvard.edu/maaslin3
 biocViews: Metagenomics, Software, Microbiome, Normalization
 BugReports: https://github.com/biobakery/maaslin2/issues

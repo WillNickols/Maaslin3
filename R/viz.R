@@ -68,216 +68,202 @@ nature_theme <- function(x_axis_labels, y_label) {
 
 
 # MaAsLin2 heatmap function for overall view of associations
-maaslin2_heatmap <-
-    function(
-        output_results,
-        title = NA,
-        cell_value = 'qval',
-        data_label = 'data',
-        metadata_label = 'metadata',
-        border_color = 'grey93',
-        color = colorRampPalette(c("darkblue", "grey90", "darkred")),
-        col_rotate = 90,
-        first_n = 50) {
-
-        # read MaAsLin output
-        df <- read.table(
-            output_results,
-            header = TRUE,
-            sep = "\t",
-            fill = TRUE,
-            comment.char = "" ,
-            check.names = FALSE
-        )
-
-        title_additional <- ""
-        
-        title_additional <- ""
-        if (!is.na(first_n) & first_n > 0 & first_n < dim(df)[1]) {
-            if (cell_value == 'coef') {
-                df <- df[order(-abs(df[[cell_value]])) , ]
-            } else{
-                df <- df[order(df[[cell_value]]), ]
-            }
-            # get the top n features with significant associations
-            df_sub <- df[1:first_n,]
-            for (first_n_index in seq(first_n, dim(df)[1]))
-            {
-                if (length(unique(df_sub$feature)) == first_n)
-                {
-                    break
-                }
-                df_sub <- df[1:first_n_index,]
-            }
-            # get all rows that have the top N features
-            df <- df[which(df$feature %in% df_sub$feature),]
-            title_additional <- paste("Top", first_n, sep=" ")
-        }
-        
-        if (dim(df)[1] < 2) {
-            print('There are no associations to plot!')
-            return(NULL)
-        }
-        
-        metadata <- df$metadata
-        data <- df$feature
-        dfvalue <- df$value
-        value <- NA
-        
-        # values to use for coloring the heatmap
-        # and set the colorbar boundaries
-        if (cell_value == "pval") {
-            value <- -log(df$pval) * sign(df$coef)
-            value <- pmax(-20, pmin(20, value))
-            if (is.null(title))
-                title <- "(-log(pval)*sign(coeff))"
-        } else if (cell_value == "qval") {
-            value <- -log(df$qval) * sign(df$coef)
-            value <- pmax(-20, pmin(20, value))
-            if (is.null(title))
-                title <- "(-log(qval)*sign(coeff))"
-        } else if (cell_value == "coef") {
-            value <- df$coef
-            if (is.null(title))
-                title <- "(coeff)"
-        }
-   
-        if (title_additional!="") {
-            title <- paste(title_additional, "features with significant associations", title, sep=" ")
-        } else {
-            title <- paste("Significant associations", title, sep=" ")
-        }
-
-        # identify variables with more than one level present
-        verbose_metadata <- c()
-        metadata_multi_level <- c()
-        for (i in unique(metadata)) {
-            levels <- unique(df$value[df$metadata == i])
-            if (length(levels) > 1) {
-                metadata_multi_level <- c(metadata_multi_level, i)
-                for (j in levels) {
-                    verbose_metadata <- c(verbose_metadata, paste(i, j))
-                }
-            } else {
-               verbose_metadata <- c(verbose_metadata, i)
-            }
-        }
-
-        n <- length(unique(data))
-        m <- length(unique(verbose_metadata))
-
-        if (n < 2) {
-            print(
-                paste(
-                    "There is not enough features in the associations",
-                    "to create a heatmap plot.",
-                    "Please review the associations in text output file.")
-            )
-            return(NULL)
-        }
-        
-        if (m < 2) {
-            print(
-                paste(
-                    "There is not enough metadata in the associations",
-                    "to create a heatmap plot.",
-                    "Please review the associations in text output file.")
-            )
-            return(NULL)
-        }
-        
-        a = matrix(0, nrow = n, ncol = m)
-        a <- as.data.frame(a)
-        
-        rownames(a) <- unique(data)
-        colnames(a) <- unique(verbose_metadata)
-
-        for (i in seq_len(dim(df)[1])) {
-            current_metadata <- metadata[i]
-            if (current_metadata %in% metadata_multi_level) {
-                current_metadata <- paste(metadata[i], dfvalue[i])
-            }
-            if (abs(a[as.character(data[i]), 
-                    as.character(current_metadata)]) > abs(value[i]))
-                next
-            a[as.character(data[i]), as.character(current_metadata)] <- value[i]
-        }
+maaslin3_heatmap <-
+  function(
+    df_in,
+    border_color = 'grey93',
+    color = colorRampPalette(c("darkblue", "grey90", "darkred")),
+    first_n = 50,
+    max_significance = 0.1) {
+    
+    df_in <- df_in[is.na(df_in$error),]
+    df_in <- df_in[!is.na(df_in[['qval_single']]),]
+    
+    plot_list <- list()
+    
+    for (association_type in c("abundance", "prevalence")) {
+      df <- df_in[df_in$association == association_type,]
       
-        # get the range for the colorbar
-        max_value <- ceiling(max(a))
-        min_value <- ceiling(min(a))
-        range_value <- max(c(abs(max_value),abs(min_value)))
-        breaks <- seq(-1*range_value, range_value, by = 1)
+      # Subset to just the top features if necessary
+      title_additional <- ""
+      if (!is.na(first_n) & first_n > 0 & first_n < dim(df)[1]) {
+        df <- df[order(df[['qval_single']]), ]
+        # get the top n features with significant associations
+        df_sub <- df[1:first_n,]
+        for (first_n_index in seq(first_n, dim(df)[1]))
+        {
+          if (length(unique(df_sub$feature)) == first_n)
+          {
+            break
+          }
+          df_sub <- df[1:first_n_index,]
+        }
+        # get all rows that have the top N features
+        df <- df[which(df$feature %in% df_sub$feature),]
+        title_additional <- paste("Top", first_n, sep=" ")
+      }
+      
+      if (dim(df)[1] < 2) {
+        print('There are no associations to plot!')
+        return(NULL)
+      }
+      
+      metadata <- df$metadata
+      data <- df$feature
+      dfvalue <- df$value
 
-        p <- NULL
-        tryCatch({
-            p <-
-                pheatmap::pheatmap(
-                    a,
-                    cellwidth = 5,
-                    cellheight = 5,
-                    # changed to 3
-                    main = title,
-                    fontsize = 6,
-                    kmeans_k = NA,
-                    border = TRUE,
-                    show_rownames = TRUE,
-                    show_colnames = TRUE,
-                    scale = "none",
-                    cluster_rows = FALSE,
-                    cluster_cols = TRUE,
-                    clustering_distance_rows = "euclidean",
-                    clustering_distance_cols = "euclidean",
-                    legend = TRUE,
-                    border_color = border_color,
-                    color = color(range_value*2),
-                    breaks = breaks,
-                    treeheight_row = 0,
-                    treeheight_col = 0,
-                    display_numbers = matrix(ifelse(
-                        a > 0.0, "+", ifelse(a < 0.0, "-", "")), nrow(a)),
-                    silent = TRUE
-                )
-        }, error = function(err) {
-            logging::logerror("Unable to plot heatmap")
-            logging::logerror(err)
-        })
-        return(p)
+      # values to use for coloring the heatmap
+      # and set the colorbar boundaries
+      value <- df$coef
+      qvalue <- df$qval_single
+      min_val <- ifelse(sum(qvalue < max_significance) > 0,
+                        min(value[qvalue < max_significance]), 
+                        min(value))
+      max_val <- ifelse(sum(qvalue < max_significance) > 0,
+                        max(value[qvalue < max_significance]), 
+                        max(value))
+      value <- pmax(min_val, pmin(max_val, value))
+      
+      if (title_additional!="") {
+        title <- paste(title_additional, "features with significant\n", association_type, "associations (coefficient)", sep=" ")
+      } else {
+        title <- paste("Significant associations", sep=" ")
+      }
+      
+      # identify variables with more than one level present
+      verbose_metadata <- c()
+      metadata_multi_level <- c()
+      for (i in unique(metadata)) {
+        levels <- unique(df$value[df$metadata == i])
+        if (length(levels) > 1) {
+          metadata_multi_level <- c(metadata_multi_level, i)
+          for (j in levels) {
+            verbose_metadata <- c(verbose_metadata, paste(i, j))
+          }
+        } else {
+          verbose_metadata <- c(verbose_metadata, i)
+        }
+      }
+      
+      n <- length(unique(data))
+      m <- length(unique(verbose_metadata))
+      
+      if (n < 2) {
+        print(
+          paste(
+            "There is not enough features in the associations",
+            "to create a heatmap plot.",
+            "Please review the associations in text output file.")
+        )
+        return(NULL)
+      }
+      
+      if (m < 2) {
+        print(
+          paste(
+            "There is not enough metadata in the associations",
+            "to create a heatmap plot.",
+            "Please review the associations in text output file.")
+        )
+        return(NULL)
+      }
+      
+      # a for coef, b for qval
+      a = matrix(0, nrow = n, ncol = m)
+      a <- as.data.frame(a)
+      b = matrix(0, nrow = n, ncol = m)
+      b <- as.data.frame(b)
+      
+      rownames(a) <- rownames(b) <- unique(data)
+      colnames(a) <- colnames(b) <- unique(verbose_metadata)
+      
+      for (i in seq_len(dim(df)[1])) {
+        current_metadata <- metadata[i]
+        if (current_metadata %in% metadata_multi_level) {
+          current_metadata <- paste(metadata[i], dfvalue[i])
+        }
+        if (abs(a[as.character(data[i]), 
+                  as.character(current_metadata)]) > abs(value[i]))
+          next
+        a[as.character(data[i]), as.character(current_metadata)] <- value[i]
+        b[as.character(data[i]), as.character(current_metadata)] <- qvalue[i]
+      }
+      
+      # get the range for the colorbar
+      max_value <- ceiling(max(a))
+      min_value <- ceiling(min(a))
+      range_value <- max(c(abs(max_value),abs(min_value)))
+      breaks <- seq(-1*range_value, range_value, by = 0.1)
+      
+      p <- NULL
+      tryCatch({
+        plot_list[[association_type]] <-
+          pheatmap::pheatmap(
+            a,
+            cellwidth = 5,
+            cellheight = 5,
+            # changed to 3
+            main = title,
+            fontsize = 6,
+            kmeans_k = NA,
+            border = TRUE,
+            show_rownames = TRUE,
+            show_colnames = TRUE,
+            scale = "none",
+            cluster_rows = FALSE,
+            cluster_cols = TRUE,
+            clustering_distance_rows = "euclidean",
+            clustering_distance_cols = "euclidean",
+            legend = TRUE,
+            border_color = border_color,
+            color = color(length(breaks)),
+            breaks = breaks,
+            legend_labels = 'Coefficient',
+            treeheight_row = 0,
+            treeheight_col = 0,
+            display_numbers = matrix(ifelse(
+              b < max_significance, "+", ""), nrow(b)),
+            number_color = "white",
+            silent = TRUE
+          )[[4]]
+      }, error = function(err) {
+        logging::logerror("Unable to plot heatmap")
+        logging::logerror(err)
+      })
     }
+
+    p <- arrangeGrob(grobs=plot_list,ncol=2)
+    
+    return(p)
+}
 
 save_heatmap <-
     function(
-        results_file,
+        df_in,
         heatmap_file,
         figures_folder,
-        title = NULL,
-        cell_value = "qval",
-        data_label = 'data',
-        metadata_label = 'metadata',
         border_color = "grey93",
-        color = colorRampPalette(c("blue", "grey90", "red")),
-        first_n = 50) {
+        color = colorRampPalette(c("darkblue", "grey90", "darkred")),
+        first_n = 50,
+        max_significance = 0.1) {
 
         # generate a heatmap and save it to a pdf and as a png
         heatmap <-
-            maaslin2_heatmap(
-                results_file,
-                title,
-                cell_value,
-                data_label,
-                metadata_label,
-                border_color,
-                color,
-                first_n)
+            maaslin3_heatmap(
+              df_in,
+              border_color,
+              color,
+              first_n,
+              max_significance)
         
         if (!is.null(heatmap)) {
-            pdf(heatmap_file)
-            print(heatmap)
+            pdf(heatmap_file, height = 11, width = 8.5)
+            grid.arrange(heatmap)
             dev.off()
 
             png_file <- file.path(figures_folder,"heatmap.png")
-            png(png_file, res = 150, height = 800, width = 1100)
-            print(heatmap)
+            png(png_file, res = 150, height = 800, width = 1200)
+            grid.arrange(heatmap)
             dev.off()
         }
 
