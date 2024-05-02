@@ -28,7 +28,7 @@
 # individual associations as scatterplot and boxplot
 
 # Load libararies
-for (lib in c('ggplot2', "grid", 'pheatmap')) {
+for (lib in c('ggplot2', "grid", 'pheatmap', 'gridExtra')) {
     suppressPackageStartupMessages(require(lib, character.only = TRUE))
 }
 
