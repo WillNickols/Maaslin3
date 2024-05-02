@@ -4,6 +4,5 @@ R/.Rhistory
 *.DS_Store
 R/output/*
 R/binary_tests/*
-*.tsv
 R/tmp_out/*
 R/fit_seperable.R
