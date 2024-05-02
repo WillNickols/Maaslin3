@@ -41,15 +41,3 @@ write.table(rbind(fit_out$fit_data_non_zero$results,
                   fit_out$fit_data_binary$results), 
             'results.tsv', sep = '\t', row.names = F)
 ```
-
-
-
-
-
-
-
-
-
-
-
->>>>>>> Stashed changes
