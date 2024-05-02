@@ -5,6 +5,7 @@
 TSSnorm = function(features) {
   # Convert to Matrix from Data Frame
   features_norm = as.matrix(features)
+  X_mask <- ifelse(features > 0, 1, 0)
   dd <- colnames(features_norm)
   
   ##############
@@ -28,6 +29,8 @@ TSSnorm = function(features) {
     warning("result contains NaN, perhaps due to impossible mathematical\n
             operation\n")
   
+  x <- ifelse(X_mask, x, NA)
+  
   # Convert back to data frame
   features_TSS <- as.data.frame(x)
   
@@ -42,6 +45,7 @@ TSSnorm = function(features) {
 ## CLR Normalization #
 ######################
 
+# Only CLRs on the non-zero part of the vector
 CLRnorm = function(features) {
   # Convert to Matrix from Data Frame
   features_norm = as.matrix(features)
@@ -52,10 +56,12 @@ CLRnorm = function(features) {
   #####################
   
   # CLR Normalizing the Data
-  X <- features_norm + 1
-  Xgeom <- exp(1)^apply(log(X), 1, mean)
+  X <- features_norm
+  X_mask <- ifelse(X > 0, 1, 0)
+  Xgeom <- exp(1)^apply(X, 1, function(x) {mean(log(x[x > 0]))})
   features_CLR <- log(X/Xgeom)
-  
+  features_CLR <- ifelse(X_mask, features_CLR, NA)
+
   # Convert back to data frame
   features_CLR <- as.data.frame(features_CLR)
   
@@ -145,8 +151,6 @@ MRcounts <- function (counts, norm_factors, sl = 1000)  {
   if (any(is.na(norm_factors))) {
     x = cumNormMat(as.matrix(counts), sl = sl)
   } else {
-    print(dim(counts))
-    print(norm_factors/sl)
     x = sweep(as.matrix(counts), 2, norm_factors/sl, "/")
   }
   return(x)
@@ -154,13 +158,19 @@ MRcounts <- function (counts, norm_factors, sl = 1000)  {
 
 CSSnorm = function(features) {
   features_norm = as.matrix(features)
+  X_mask <- ifelse(features_norm > 0, 1, 0)
   dd <- colnames(features_norm)
   
   counts = t(features_norm)
+  counts = counts[,colSums(counts, na.rm = T) > 0]
   norm_factors <- calcNormFactors(counts)$normFactors
   features_CSS <- as.data.frame(t(MRcounts(counts, norm_factors)))
   
+  features_CSS[setdiff(rownames(features_norm),rownames(features_CSS)),] <- NA
+  features_CSS <- features_CSS[match(rownames(features_norm), rownames(features_CSS)), ]
+  
   colnames(features_CSS) <- dd
+  features_CSS <- data.frame(ifelse(X_mask > 0, as.matrix(features_CSS), NA))
   
   return(features_CSS)
 }
@@ -233,10 +243,12 @@ CSSnorm = function(features) {
 TMMnorm = function(features) {
   # Convert to Matrix from Data Frame
   features_norm = as.matrix(features)
+  X_mask <- ifelse(features_norm > 0, 1, 0)
   dd <- colnames(features_norm)
   
   # TMM Normalizing the Data
   X <- t(features_norm)
+  X = X[,colSums(X, na.rm = T) > 0]
   x <- as.matrix(X)
   if (any(is.na(x)))
     stop("NA counts not permitted")
@@ -280,11 +292,71 @@ TMMnorm = function(features) {
   # Convert back to data frame
   features_TMM <- as.data.frame(t(X.output))
   
+  features_TMM[setdiff(rownames(features_norm), rownames(features_TMM)),] <- NA
+  features_TMM <- features_TMM[match(rownames(features_norm), rownames(features_TMM)), ]
+  
   # Rename the True Positive Features - Same Format as Before
   colnames(features_TMM) <- dd
   
+  features_TMM <- data.frame(ifelse(X_mask > 0, as.matrix(features_TMM), NA))
+  
   # Return as list
   return(features_TMM)
+}
+
+######################
+# NONE Normalization #
+######################
+
+NONEnorm = function(features) {
+  X <- as.matrix(features)
+  X_mask <- ifelse(X > 0, 1, 0)
+  features_NONE <- data.frame(ifelse(X_mask > 0, X, NA))
+  return(features_NONE)
+}
+
+##########################
+# Unscaled Normalization #
+##########################
+
+UNSCALEDnorm = function(features, abs_abundances) {
+  # Convert to Matrix from Data Frame
+  if (colnames(abs_abundances) == 'total') {
+    X_mask <- ifelse(features > 0, 1, 0)
+    abs_mult_fact <- abs_abundances[rownames(features),1]
+  } else {
+    abs_feature <- colnames(abs_abundances)
+    X_mask <- ifelse(features[,colnames(features) != abs_feature] > 0, 1, 0)
+    abs_mult_fact <- abs_abundances[rownames(features),1] / features[,abs_feature]
+    features <- features[,colnames(features) != abs_feature]
+  }
+  
+  features_norm = as.matrix(features)
+  dd <- colnames(features_norm)
+  x <- as.matrix(features_norm)
+  
+  MARGIN <- 1
+  
+  x <- sweep(x, MARGIN, abs_mult_fact, "*")
+  attr <- list(total = abs_mult_fact, margin = MARGIN)
+  if (any(is.nan(x))) 
+    warning("result contains NaN, perhaps due to impossible mathematical\n
+            operation\n")
+  
+  if (any(is.infinite(x))) 
+    warning("result contains Inf, perhaps due to impossible mathematical\n
+            operation\n")
+  
+  x <- ifelse(X_mask, x, NA)
+  
+  # Convert back to data frame
+  features_ABS <- as.data.frame(x)
+  
+  # Rename the features - Same Format as Before
+  colnames(features_ABS) <- dd
+  
+  # Return
+  return(features_ABS)
 }
 
 #######################################
@@ -292,8 +364,9 @@ TMMnorm = function(features) {
 #######################################
 
 AST <- function(x) {
+  input_na_count <- sum(is.na(x))
   y <- sign(x) * asin(sqrt(abs(x)))
-  if(any(is.na(y))) {
+  if(input_na_count < sum(is.na(y))) {
     logging::logerror(
       paste0("AST transform is only valid for values between -1 and 1. ",
              "Please select an appropriate normalization option or ",
@@ -331,7 +404,9 @@ LOGIT <- function(p) {
   }
   a <- 1
   y <- log((0.5 + a * (p - 0.5))/(1 - (0.5 + a * (p - 0.5))))
-  y[!is.finite(y)] <- 0
+  if(any(y[!is.na(y)] == -Inf)) {
+    stop("Logit transformation is only valid for values above 0")
+  }
   return(y)
 }
 
@@ -340,8 +415,10 @@ LOGIT <- function(p) {
 ######################
 
 LOG <- function(x) {
-  y <- replace(x, x == 0, min(x[x>0]) / 2)
-  return(log2(y))
+  if(any(x[!is.na(x)] <= 0)) {
+    stop("Log transformation is only valid for values above 0")
+  }
+  return(log2(x))
 }
 
 ############################

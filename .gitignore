@@ -3,3 +3,6 @@ R/.DS_Store
 R/.Rhistory
 *.DS_Store
 R/output/*
+R/binary_tests/*
+R/tmp_out/*
+R/fit_seperable.R
