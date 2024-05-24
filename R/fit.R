@@ -187,6 +187,16 @@ get_fixed_effects <- function(formula, random_effects_formula, dat_sub, groups, 
   return(names_to_include)
 }
 
+get_character_cols <- function(dat_sub) {
+  all_factors <- c()
+  for (col in colnames(dat_sub)) {
+    if (!is.numeric(dat_sub[,col])) {
+      all_factors <- c(all_factors, paste0(col, unique(dat_sub[,col])))
+    }
+  }
+  return(all_factors)
+}
+
 # For group effects
 generate_new_formula_groups <- function(formula, random_effects_formula, dat_sub, groups, gomps, omps, group) {
   if (is.null(random_effects_formula)) {
@@ -1840,7 +1850,7 @@ fit.model <- function(
     save_models = FALSE,
     augment = FALSE,
     cores = 1) {
-  function_vec <- c("augment_data", "safe_deparse", "extract_special_predictor", "get_fixed_effects", "generate_new_formula_groups", 
+  function_vec <- c("augment_data", "safe_deparse", "extract_special_predictor", "get_fixed_effects", "get_character_cols", "generate_new_formula_groups", 
                     "generate_new_formula_gomps", "generate_new_formula_omps", "add_joint_signif", "append_joint", "bind_and_reorder",
                     "gomp_lm", "gomp_lmer", "gomp_glm", "gomp_glm_augment", "gomp_glmer", "gomp_glmer_augment", "nlog_likelihood_linear_regression",
                     "nlog_likelihood_logistic_regression", "get_nll_big", "get_nll_with_coef", "get_nll_with_coef_re", "fill_left_of_ones",
@@ -1919,12 +1929,12 @@ fit.model <- function(
               }
           summary_function <- function(fit) {
               lm_summary <- coef(summary(fit))
-              if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
-                store_names <- rownames(lm_summary)
-                rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
-                lm_summary <- rbind(lm_summary, matrix(rep(NaN, 5 * length(rows_to_add)), nrow=length(rows_to_add)))
-                rownames(lm_summary) <- c(store_names, rows_to_add)
-              }
+              # if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
+              #   store_names <- rownames(lm_summary)
+              #   rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
+              #   lm_summary <- rbind(lm_summary, matrix(rep(NaN, 5 * length(rows_to_add)), nrow=length(rows_to_add)))
+              #   rownames(lm_summary) <- c(store_names, rows_to_add)
+              # }
               para <- as.data.frame(lm_summary)[-1, -c(3:4)]
               para$name <- rownames(lm_summary)[-1]
               return(para)
@@ -2026,12 +2036,12 @@ fit.model <- function(
       summary_function <- function(fit) {
         lm_summary <- coef(summary(fit))
         
-        if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
-          store_names <- rownames(lm_summary)
-          rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
-          lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
-          rownames(lm_summary) <- c(store_names, rows_to_add)
-        }
+        # if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
+        #   store_names <- rownames(lm_summary)
+        #   rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
+        #   lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
+        #   rownames(lm_summary) <- c(store_names, rows_to_add)
+        # }
         para <- as.data.frame(lm_summary)[-1, -3]
         para$name <- rownames(lm_summary)[-1]
         return(para)
@@ -2540,8 +2550,16 @@ fit.model <- function(
       # Check whether summaries are correct
       names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, gomps, omps)
       if (any(!(names_to_include %in% rownames(output$para)))) {
-        fit_properly <- FALSE
-        fit_and_message[[length(fit_and_message)]] <- "Metadata dropped during fitting (rank deficient)"
+        
+        # Don't worry about dropped factor levels
+        missing_names <- names_to_include[!(names_to_include %in% rownames(output$para))]
+        character_cols <- get_character_cols(dat_sub)
+        if (!all(missing_names %in% character_cols)) {
+          fit_properly <- FALSE
+          fit_and_message[[length(fit_and_message)]] <- "Metadata dropped during fitting (rank deficient)"
+        } else {
+          fit_properly <- TRUE
+        }
       } else { # No errors, summaries are correct
         fit_properly <- TRUE
       }

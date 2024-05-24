@@ -6,3 +6,4 @@ R/output/*
 R/binary_tests/*
 R/tmp_out/*
 R/fit_seperable.R
+results_inferred_absolute.tsv
