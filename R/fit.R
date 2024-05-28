@@ -191,7 +191,9 @@ get_character_cols <- function(dat_sub) {
   all_factors <- c()
   for (col in colnames(dat_sub)) {
     if (!is.numeric(dat_sub[,col])) {
-      all_factors <- c(all_factors, paste0(col, unique(dat_sub[,col])))
+      factor_levels <- levels(factor(dat_sub[,col]))
+      # All factor levels except basline
+      all_factors <- c(all_factors, paste0(col, unique(factor_levels[-1])))
     }
   }
   return(all_factors)
@@ -1900,11 +1902,11 @@ fit.model <- function(
                              family = 'gaussian',
                              na.action = na.action))
               }
-          summary_function <- function(fit) {
+          summary_function <- function(fit, names_to_include) {
               lm_summary <- summary(fit)$coefficients
-              if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
+              if (nrow(lm_summary) < length(names_to_include)) { # If deficient rank, make sure all rownames are included
                 store_names <- rownames(lm_summary)
-                rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
+                rows_to_add = names_to_include[!(names_to_include %in% store_names)]
                 lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
                 rownames(lm_summary) <- c(store_names, rows_to_add)
               }
@@ -1927,14 +1929,14 @@ fit.model <- function(
                       na.action = na.action,
                       control = lmerControl(check.rankX = "stop.deficient")))
               }
-          summary_function <- function(fit) {
+          summary_function <- function(fit, names_to_include) {
               lm_summary <- coef(summary(fit))
-              # if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
-              #   store_names <- rownames(lm_summary)
-              #   rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
-              #   lm_summary <- rbind(lm_summary, matrix(rep(NaN, 5 * length(rows_to_add)), nrow=length(rows_to_add)))
-              #   rownames(lm_summary) <- c(store_names, rows_to_add)
-              # }
+              if (nrow(lm_summary) < length(names_to_include)) { # If deficient rank, make sure all rownames are included
+                store_names <- rownames(lm_summary)
+                rows_to_add = names_to_include[!(names_to_include %in% store_names)]
+                lm_summary <- rbind(lm_summary, matrix(rep(NaN, 5 * length(rows_to_add)), nrow=length(rows_to_add)))
+                rownames(lm_summary) <- c(store_names, rows_to_add)
+              }
               para <- as.data.frame(lm_summary)[-1, -c(3:4)]
               para$name <- rownames(lm_summary)[-1]
               return(para)
@@ -1984,11 +1986,11 @@ fit.model <- function(
         gomp_function <- gomp_glm
         omp_function <- omp_glm
       }
-      summary_function <- function(fit) {
+      summary_function <- function(fit, names_to_include) {
         lm_summary <- summary(fit)$coefficients
-        if (nrow(lm_summary) < length(coef(fit))) { # If equal numbers of predictors and observations
+        if (nrow(lm_summary) < length(names_to_include)) { # If equal numbers of predictors and observations
           store_names <- rownames(lm_summary)
-          rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
+          rows_to_add = names_to_include[!(names_to_include %in% store_names)]
           lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
           rownames(lm_summary) <- c(store_names, rows_to_add)
         }
@@ -2033,15 +2035,15 @@ fit.model <- function(
         gomp_function <- gomp_glmer
         omp_function <- omp_glmer
       }
-      summary_function <- function(fit) {
+      summary_function <- function(fit, names_to_include) {
         lm_summary <- coef(summary(fit))
         
-        # if (nrow(lm_summary) < length(coef(fit))) { # If deficient rank, make sure all rownames are included
-        #   store_names <- rownames(lm_summary)
-        #   rows_to_add = names(coef(fit))[!(names(coef(fit)) %in% store_names)]
-        #   lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
-        #   rownames(lm_summary) <- c(store_names, rows_to_add)
-        # }
+        if (nrow(lm_summary) < length(names_to_include)) { # If deficient rank, make sure all rownames are included
+          store_names <- rownames(lm_summary)
+          rows_to_add = names_to_include[!(names_to_include %in% store_names)]
+          lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
+          rownames(lm_summary) <- c(store_names, rows_to_add)
+        }
         para <- as.data.frame(lm_summary)[-1, -3]
         para$name <- rownames(lm_summary)[-1]
         return(para)
@@ -2112,6 +2114,40 @@ fit.model <- function(
       output$para$feature <- colnames(features)[x]
       output$para$error <- ifelse(model == "logistic", "All logistic values are the same",
                                   "All LM values are the same")
+      return(output)
+    }
+    
+    # Missing first factor level
+    missing_first_factor_level <- FALSE
+    for (col in colnames(dat_sub)) {
+      if(!is.numeric(dat_sub[,col])) {
+        if (all(is.na(dat_sub$expr[dat_sub[,col] == levels(factor(dat_sub[,col]))[1]]))) {
+          fixed_effects <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, gomps, omps)
+          if (col %in% substr(fixed_effects, 1, nchar(col))) {
+            missing_first_factor_level <- TRUE
+          }
+        }
+      }
+    }
+      
+    if (missing_first_factor_level) {
+      output <- list()
+      
+      # List fixed effects that will be included
+      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, gomps, omps)
+      
+      # Build outputs
+      output$para <- as.data.frame(matrix(NA, nrow = length(names_to_include), ncol = 3))
+      output$para$name <- names_to_include
+      
+      output$residuals <- NA
+      output$fitted <- NA
+      if (!(is.null(random_effects_formula))) output$ranef <- NA
+      output$fit <- NA
+      
+      colnames(output$para) <- c('coef', 'stderr' , 'pval', 'name')
+      output$para$feature <- colnames(features)[x]
+      output$para$error <- "No data points have the baseline factor level"
       return(output)
     }
 
@@ -2441,8 +2477,8 @@ fit.model <- function(
     # Check for fitting errors and add on special predictors
     low_n_error <- FALSE
     if (all(!inherits(fit, "try-error"))) {
-      output$para <- summary_function(fit)
       names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, character(0), character(0), character(0))
+      output$para <- summary_function(fit, c('(Intercept)', names_to_include))
       output$para <- output$para[names_to_include, , drop=F]
       
       n_uni_cols <- nrow(output$para)
