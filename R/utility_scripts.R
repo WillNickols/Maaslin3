@@ -598,7 +598,7 @@ write_results_in_lefse_format <- function(results, output_file_name) {
       if(results[i,]$qval_single < 0.1) {
         lines_vec[i] <- paste0(c(results[i,]$feature, 
                                  results[i,]$coef, 
-                                 results[i,]$value, 
+                                 paste0(results[i,]$metadata, '_', results[i,]$value), 
                                  results[i,]$coef, 
                                  results[i,]$pval_single), 
                                collapse = '\t')
