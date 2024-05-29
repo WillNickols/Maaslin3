@@ -590,3 +590,30 @@ write_results <- function(params_data_formula_fit) {
     row.names = FALSE
   )
 }
+
+write_results_in_lefse_format <- function(results, output_file_name) {
+  lines_vec <- vector(length = nrow(results))
+  for (i in 1:nrow(results)) {
+    if (is.na(results[i,]$error) & !is.na(results[i,]$qval_single)) {
+      if(results[i,]$qval_single < 0.1) {
+        lines_vec[i] <- paste0(c(results[i,]$feature, 
+                                 results[i,]$coef, 
+                                 results[i,]$value, 
+                                 results[i,]$coef, 
+                                 results[i,]$pval_single), 
+                               collapse = '\t')
+      } else {
+        lines_vec[i] <- paste0(c(results[i,]$feature, 
+                                 results[i,]$coef, 
+                                 "", 
+                                 "", 
+                                 "-"), 
+                               collapse = '\t')
+      }
+    }
+  }
+  lines_vec <- lines_vec[lines_vec != 'FALSE']
+  
+  writeLines(sort(lines_vec), con = output_file_name)
+}
+

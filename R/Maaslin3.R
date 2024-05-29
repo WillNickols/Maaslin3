@@ -1742,6 +1742,24 @@ maaslin_write_results <- function(params_data_formula_fit) {
   return(params_data_formula_fit)
 }
 
+maaslin_write_results_lefse_format <- function(params_data_formula_fit) {
+  param_list <- maaslin_parse_param_list(params_data_formula_fit[["param_list"]])
+  output <- param_list[["output"]]
+  
+  # create an output folder if it does not exist
+  if (!file.exists(output)) {
+    print("Creating output folder")
+    dir.create(output)
+  }
+  
+  write_results_in_lefse_format(params_data_formula_fit$fit_data_non_zero$results, 
+                                file.path(output, 'lefse_style_results_abundance.res'))
+  write_results_in_lefse_format(params_data_formula_fit$fit_data_binary$results, 
+                                file.path(output, 'lefse_style_results_prevalence.res'))
+  
+  return(params_data_formula_fit)
+}
+
 #######################################################
 # Create visualizations for results passing threshold #
 #######################################################
