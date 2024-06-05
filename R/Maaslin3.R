@@ -1604,6 +1604,11 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     tmp_line <- NULL
   }
   
+  outputs[["param_list"]][['output']] <- paste0(gsub("/$", "", outputs[["param_list"]][['output']]),
+                                                    '/iteration_', 0)
+  maaslin_write_results(outputs)
+  outputs[["param_list"]][['output']] <- gsub("\\/iteration_0", "", outputs[["param_list"]][['output']])
+  
   # Create a matrix of the low q-value removed features
   drop_vec <- c()
   growing_results_mat <- NULL
@@ -1672,6 +1677,10 @@ maaslin_fit_iterative = function(params_and_data_and_formula) {
     
     outputs_tmp$fit_data_non_zero$results$controlled_for <- paste0(drop_vec, collapse = ",")
     outputs_tmp$fit_data_binary$results$controlled_for <- paste0(drop_vec, collapse = ",")
+    
+    outputs_tmp[["param_list"]][['output']] <- paste0(gsub("/$", "", outputs_tmp[["param_list"]][['output']]),
+                                                      '/iteration_', length(drop_vec))
+    maaslin_write_results(outputs_tmp)
     
     stored_binary_results <- outputs_tmp$fit_data_binary
     

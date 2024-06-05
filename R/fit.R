@@ -1897,15 +1897,14 @@ fit.model <- function(
       if (is.null(random_effects_formula)) { # Fixed effects only
           model_function <-
               function(formula, data, na.action) {
-                  return(glm(formula(formula), 
+                  return(lm(formula(formula), 
                              data = data,
-                             family = 'gaussian',
                              na.action = na.action))
               }
           summary_function <- function(fit, names_to_include) {
               lm_summary <- summary(fit)$coefficients
               if (nrow(lm_summary) < length(names_to_include)) { # If deficient rank, make sure all rownames are included
-                store_names <- rownames(lm_summary)
+                store_names <- gsub('`', '', rownames(lm_summary))
                 rows_to_add = names_to_include[!(names_to_include %in% store_names)]
                 lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
                 rownames(lm_summary) <- c(store_names, rows_to_add)
@@ -1926,13 +1925,12 @@ fit.model <- function(
                   return(lmerTest::lmer(
                       formula(formula), 
                       data = data, 
-                      na.action = na.action,
-                      control = lmerControl(check.rankX = "stop.deficient")))
+                      na.action = na.action))
               }
           summary_function <- function(fit, names_to_include) {
               lm_summary <- coef(summary(fit))
               if (nrow(lm_summary) < length(names_to_include)) { # If deficient rank, make sure all rownames are included
-                store_names <- rownames(lm_summary)
+                store_names <- gsub('`', '', rownames(lm_summary))
                 rows_to_add = names_to_include[!(names_to_include %in% store_names)]
                 lm_summary <- rbind(lm_summary, matrix(rep(NaN, 5 * length(rows_to_add)), nrow=length(rows_to_add)))
                 rownames(lm_summary) <- c(store_names, rows_to_add)
@@ -1989,7 +1987,7 @@ fit.model <- function(
       summary_function <- function(fit, names_to_include) {
         lm_summary <- summary(fit)$coefficients
         if (nrow(lm_summary) < length(names_to_include)) { # If equal numbers of predictors and observations
-          store_names <- rownames(lm_summary)
+          store_names <- gsub('`', '', rownames(lm_summary))
           rows_to_add = names_to_include[!(names_to_include %in% store_names)]
           lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
           rownames(lm_summary) <- c(store_names, rows_to_add)
@@ -2014,7 +2012,7 @@ fit.model <- function(
               family = 'binomial',
               na.action = na.action,
               weights = weight_sch_current,
-              control = glmerControl(check.rankX = "stop.deficient", optimizer = 'bobyqa'))
+              control = glmerControl(optimizer = 'bobyqa'))
             
             remove(weight_sch_current, pos = ".GlobalEnv") # Stop being global
             
@@ -2030,7 +2028,7 @@ fit.model <- function(
               data = data, 
               family = 'binomial',
               na.action = na.action,
-              control = glmerControl(check.rankX = "stop.deficient", optimizer = 'bobyqa')))
+              control = glmerControl(optimizer = 'bobyqa')))
           }
         gomp_function <- gomp_glmer
         omp_function <- omp_glmer
@@ -2039,7 +2037,7 @@ fit.model <- function(
         lm_summary <- coef(summary(fit))
         
         if (nrow(lm_summary) < length(names_to_include)) { # If deficient rank, make sure all rownames are included
-          store_names <- rownames(lm_summary)
+          store_names <- gsub('`', '', rownames(lm_summary))
           rows_to_add = names_to_include[!(names_to_include %in% store_names)]
           lm_summary <- rbind(lm_summary, matrix(rep(NaN, 4 * length(rows_to_add)), nrow=length(rows_to_add)))
           rownames(lm_summary) <- c(store_names, rows_to_add)
@@ -2739,7 +2737,7 @@ fit.model <- function(
           if (x == y)
               x
           else
-              gsub("^\\:", "", gsub(x, "", y))
+              gsub("^\\:", "", sub(x, "", y))
       }, paras$metadata, paras$name)
   
   ##############################

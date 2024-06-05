@@ -501,47 +501,19 @@ write_results <- function(params_data_formula_fit) {
   param_list <- maaslin_parse_param_list(params_data_formula_fit[["param_list"]])
   output <- param_list[["output"]]
   max_significance <- param_list[["max_significance"]]
-  fit_data <- params_data_formula_fit[["fit_data"]]
+  fit_data <- rbind(params_data_formula_fit[["fit_data_non_zero"]]$results,
+                    params_data_formula_fit[["fit_data_binary"]]$results)
 
   #############################
   # Write all results to file #
   #############################
   
   results_file <- file.path(output, "all_results.tsv")
-  logging::loginfo(
-    "Writing all results to file (ordered by increasing q-values): %s",
-    results_file)
-  ordered_results <- fit_data$results[order(fit_data$results$qval), ]
-  # Remove any that are NA for the q-value
-  ordered_results <-
-    ordered_results[!is.na(ordered_results$qval), ]
   write.table(
-    ordered_results[c(
-      "feature",
-      "metadata",
-      "value",
-      "name",
-      "coef",
-      "stderr",
-      "N",
-      "N.not.zero",
-      "pval",
-      "qval")],
+    fit_data,
     file = results_file,
     sep = "\t",
-    quote = FALSE,
-    col.names = c(
-      "feature",
-      "metadata",
-      "name",
-      "value",
-      "coef",
-      "stderr",
-      "N",
-      "N.not.0",
-      "pval",
-      "qval"
-    ),
+    quote = FALSE,,
     row.names = FALSE
   )
   
@@ -549,46 +521,46 @@ write_results <- function(params_data_formula_fit) {
   # Write results passing threshold to file #
   ###########################################
   
-  significant_results <-
-    ordered_results[ordered_results$qval <= max_significance, ]
-  significant_results_file <-
-    file.path(output, "significant_results.tsv")
-  logging::loginfo(
-    paste("Writing the significant results",
-          "(those which are less than or equal to the threshold",
-          "of %f ) to file (ordered by increasing q-values): %s"),
-    max_significance,
-    significant_results_file
-  )
-  write.table(
-    significant_results[c(
-      "feature",
-      "metadata",
-      "value",
-      "name",
-      "coef",
-      "stderr",
-      "N",
-      "N.not.zero",
-      "pval",
-      "qval")],
-    file = significant_results_file,
-    sep = "\t",
-    quote = FALSE,
-    col.names = c(
-      "feature",
-      "metadata",
-      "value",
-      "name",
-      "coef",
-      "stderr",
-      "N",
-      "N.not.0",
-      "pval",
-      "qval"
-    ),
-    row.names = FALSE
-  )
+  # significant_results <-
+  #   ordered_results[ordered_results$qval <= max_significance, ]
+  # significant_results_file <-
+  #   file.path(output, "significant_results.tsv")
+  # logging::loginfo(
+  #   paste("Writing the significant results",
+  #         "(those which are less than or equal to the threshold",
+  #         "of %f ) to file (ordered by increasing q-values): %s"),
+  #   max_significance,
+  #   significant_results_file
+  # )
+  # write.table(
+  #   significant_results[c(
+  #     "feature",
+  #     "metadata",
+  #     "value",
+  #     "name",
+  #     "coef",
+  #     "stderr",
+  #     "N",
+  #     "N.not.zero",
+  #     "pval",
+  #     "qval")],
+  #   file = significant_results_file,
+  #   sep = "\t",
+  #   quote = FALSE,
+  #   col.names = c(
+  #     "feature",
+  #     "metadata",
+  #     "value",
+  #     "name",
+  #     "coef",
+  #     "stderr",
+  #     "N",
+  #     "N.not.0",
+  #     "pval",
+  #     "qval"
+  #   ),
+  #   row.names = FALSE
+  # )
 }
 
 write_results_in_lefse_format <- function(results, output_file_name) {
