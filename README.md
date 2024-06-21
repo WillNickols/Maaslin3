@@ -18,6 +18,7 @@ ggplot2
 grid
 pheatmap
 gridExtra
+multcomp
 ```
 
 To install MaAsLin 3, clone this repository and navigate to the cloned folder. To load the Maaslin3 function, run the following after setting `Maaslin3_path` to be the path to `../Maaslin3/R/`:

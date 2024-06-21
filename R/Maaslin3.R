@@ -52,9 +52,7 @@ if (identical(environment(), globalenv()) &&
     }
 }
 
-###########################
-# Set the default options #
-###########################
+#### Set the default options ####
 
 normalization_choices <- c("TSS", "CLR", "CSS", "NONE", "TMM")
 analysis_method_choices_names <-
@@ -89,13 +87,15 @@ args$transform <- transform_choices[1]
 args$analysis_method <- analysis_method_choices_names[1]
 args$random_effects <- NULL
 args$group_effects <- NULL
-args$gomp_effects <- NULL
 args$omp_effects <- NULL
 args$fixed_effects <- NULL
 args$formula <- NULL
 args$correction <- correction_choices[1]
 args$standardize <- TRUE
-args$iterative_mode <- FALSE
+args$median_adjust_abundance <- TRUE
+args$median_adjust_prevalence <- FALSE
+args$median_adjust_abundance_threshold <- 0.25
+args$median_adjust_prevalence_threshold <- 0.25
 args$plot_heatmap <- TRUE
 args$heatmap_first_n <- 50
 args$plot_scatter <- TRUE
@@ -107,9 +107,9 @@ args$augment <- FALSE
 args$unscaled_abundance <- NULL
 args$reference <- NULL
 
-##############################
-# Add command line arguments #
-##############################
+#### end ####
+
+#### Add command line arguments ####
 
 options <-
     optparse::OptionParser(usage = paste(
@@ -243,18 +243,6 @@ options <-
 options <-
   optparse::add_option(
     options,
-    c("--gomp_effects"),
-    type = "character",
-    dest = "gomp_effects",
-    default = args$gomp_effects,
-    help = paste("The gomp effects for the model, ",
-                 "comma-delimited for multiple effects",
-                 "[ Default: none ]"
-    )
-  )
-options <-
-  optparse::add_option(
-    options,
     c("--omp_effects"),
     type = "character",
     dest = "omp_effects",
@@ -312,11 +300,38 @@ options <-
 options <-
   optparse::add_option(
     options,
-    c("--iterative_mode"),
+    c("--median_adjust_abundance"),
     type = "logical",
-    dest = "iterative_mode",
-    default = args$iterative_mode,
-    help = paste("Run in iterative mode")
+    dest = "median_adjust_abundance",
+    default = args$median_adjust_abundance,
+    help = paste("Test abundance coefficients against the median association")
+  )
+options <-
+  optparse::add_option(
+    options,
+    c("--median_adjust_prevalence"),
+    type = "logical",
+    dest = "median_adjust_prevalence",
+    default = args$median_adjust_prevalence,
+    help = paste("Test prevalence coefficients against the median association")
+  )
+options <-
+  optparse::add_option(
+    options,
+    c("--median_adjust_abundance_threshold"),
+    type = "logical",
+    dest = "median_adjust_abundance_threshold",
+    default = args$median_adjust_abundance_threshold,
+    help = paste("Radius within which the median adjustment gives a p-value of 1")
+  )
+options <-
+  optparse::add_option(
+    options,
+    c("--median_adjust_prevalence_threshold"),
+    type = "logical",
+    dest = "median_adjust_prevalence_threshold",
+    default = args$median_adjust_prevalence_threshold,
+    help = paste("Radius within which the median adjustment gives a p-value of 1")
   )
 options <-
     optparse::add_option(
@@ -437,6 +452,8 @@ option_not_valid_error <- function(message, valid_options) {
   stop("Option not valid", call. = FALSE)
 }
 
+#### end ####
+
 ##################################################
 # Fill in parameter list with missing parameters #
 ##################################################
@@ -455,13 +472,15 @@ maaslin_parse_param_list <- function(param_list) {
                         max_significance = args$max_significance,
                         random_effects = args$random_effects,
                         group_effects = args$group_effects,
-                        gomp_effects = args$gomp_effects,
                         omp_effects = args$omp_effects,
                         fixed_effects = args$fixed_effects,
                         formula = args$formula,
                         correction = args$correction,
                         standardize = args$standardize,
-                        iterative_mode = args$iterative_mode,
+                        median_adjust_abundance = args$median_adjust_abundance,
+                        median_adjust_prevalence = args$median_adjust_prevalence,
+                        median_adjust_abundance_threshold = args$median_adjust_abundance_threshold,
+                        median_adjust_prevalence_threshold = args$median_adjust_prevalence_threshold,
                         cores = args$cores,
                         plot_heatmap = args$plot_heatmap,
                         heatmap_first_n = args$heatmap_first_n,
@@ -516,10 +535,10 @@ maaslin_check_arguments <- function(param_list) {
     )
   }
   
-  if (!is.null(param_list[['unscaled_abundance']]) & param_list[["iterative_mode"]]) {
+  if (!is.null(param_list[['unscaled_abundance']]) & param_list[["median_adjust_abundance"]]) {
     stop(
       paste(
-        "Iterative mode should not be run with unscaled abundances")
+        "Median adjustment should not be run with unscaled abundances")
     )
   }
   
@@ -623,14 +642,16 @@ maaslin_log_arguments <- function(param_list) {
   logging::logdebug("Max significance: %f", param_list[["max_significance"]])
   logging::logdebug("Random effects: %s", param_list[["random_effects"]])
   logging::logdebug("Group effects: %s", param_list[["group_effects"]])
-  logging::logdebug("Gomp effects: %s", param_list[["gomp_effects"]])
   logging::logdebug("Omp effects: %s", param_list[["omp_effects"]])
   logging::logdebug("Fixed effects: %s", param_list[["fixed_effects"]])
   logging::logdebug("Formula: %s", param_list[["formula"]])
   logging::logdebug("Correction method: %s", param_list[["correction"]])
   logging::logdebug("Standardize: %s", param_list[["standardize"]])
   logging::logdebug("Cores: %d", param_list[["cores"]])
-  logging::logdebug("Iterative mode: %s", param_list[["iterative_mode"]])
+  logging::logdebug("Abundance median adjustment: %s", param_list[["median_adjust_abundance"]])
+  logging::logdebug("Prevalence median adjustment: %s", param_list[["median_adjust_prevalence"]])
+  logging::logdebug("Abundance median adjustmentment threshold: %s", param_list[["median_adjust_abundance_threshold"]])
+  logging::logdebug("Prevalence median adjustmentment threshold: %s", param_list[["median_adjust_prevalence_threshold"]])
   logging::logdebug("Augment: %s", param_list[["augment"]])
   if (is.character(param_list[["unscaled_abundance"]])) {
     logging::logdebug("Unscaled abundance: %s", param_list[["unscaled_abundance"]])
@@ -895,7 +916,6 @@ maaslin_compute_formula <- function(params_and_data) {
   
   fixed_effects <- param_list[["fixed_effects"]]
   group_effects <- param_list[["group_effects"]]
-  gomp_effects <- param_list[["gomp_effects"]]
   omp_effects <- param_list[["omp_effects"]]
   random_effects <- param_list[["random_effects"]]
   
@@ -903,10 +923,9 @@ maaslin_compute_formula <- function(params_and_data) {
     if (!is.null(param_list[["fixed_effects"]]) | 
          !is.null(param_list[["random_effects"]]) |
         !is.null(param_list[["group_effects"]]) | 
-        !is.null(param_list[["gomp_effects"]]) |
         !is.null(param_list[["omp_effects"]])) {
       logging::logwarn(
-        paste("fixed_effects, random_effects, group_effects, gomp_effects, or omp_effects provided in addition to formula,", 
+        paste("fixed_effects, random_effects, group_effects, or omp_effects provided in addition to formula,", 
               "using fixed_effects and random_effects"))
     } else {
       logging::logwarn(
@@ -986,13 +1005,10 @@ maaslin_compute_formula <- function(params_and_data) {
     }
   }
   
-  if (!is.null(group_effects) | !is.null(gomp_effects) | !is.null(omp_effects)) {
+  if (!is.null(group_effects) | !is.null(omp_effects)) {
     multi_effects <- c()
     if (!is.null(group_effects)) {
       multi_effects <- c(multi_effects, strsplit(group_effects, ",", fixed = TRUE))
-    }
-    if (!is.null(gomp_effects)) {
-      multi_effects <- c(multi_effects, strsplit(gomp_effects, ",", fixed = TRUE))
     }
     if (!is.null(omp_effects)) {
       multi_effects <- c(multi_effects, strsplit(omp_effects, ",", fixed = TRUE))
@@ -1001,7 +1017,7 @@ maaslin_compute_formula <- function(params_and_data) {
     common_variables <- intersect(fixed_effects, multi_effects)
     if (length(common_variables) > 0) {
       logging::logwarn(
-        paste("Feature name included as fixed and group/gomp/omp effect,",
+        paste("Feature name included as fixed and group/omp effect,",
               "check that this is intended: %s"),
         paste(common_variables, collapse = " , ")
       )
@@ -1014,22 +1030,19 @@ maaslin_compute_formula <- function(params_and_data) {
     }
   }
   
-  if (length(fixed_effects) == 0 & length(group_effects) == 0 & length(gomp_effects) == 0 & length(omp_effects) == 0) {
-    logging::logerror("No fixed/group/gomp/omp effects provided.")
+  if (length(fixed_effects) == 0 & length(group_effects) == 0 & length(omp_effects) == 0) {
+    logging::logerror("No fixed/group/omp effects provided.")
     stop()
   }
   
   # reduce metadata to only include fixed/group/random effects in formula
-  effects_names <- unique(c(fixed_effects, random_effects, group_effects, gomp_effects, omp_effects))
+  effects_names <- unique(c(fixed_effects, random_effects, group_effects, omp_effects))
   metadata <- metadata[, effects_names, drop = FALSE]
   
   # create the fixed effects formula text
   formula_effects <- fixed_effects
   if (length(group_effects) > 0) {
     formula_effects <- union(formula_effects, paste0("group(", group_effects, ")"))
-  }
-  if (length(gomp_effects) > 0) {
-    formula_effects <- union(formula_effects, paste0("gomp(", gomp_effects, ")"))
   }
   if (length(omp_effects) > 0) {
     formula_effects <- union(formula_effects, paste0("omp(", omp_effects, ")"))
@@ -1092,10 +1105,9 @@ maaslin_check_formula <- function(params_and_data) {
   if (!is.null(param_list[["fixed_effects"]]) | 
       !is.null(param_list[["random_effects"]]) | 
       !is.null(param_list[["group_effects"]]) | 
-      !is.null(param_list[["gomp_effects"]]) | 
       !is.null(param_list[["omp_effects"]])) {
     logging::logwarn(
-      paste("fixed_effects, random_effects, group_effects, gomp_effects, omp_effects provided in addition to formula,", 
+      paste("fixed_effects, random_effects, group_effects, omp_effects provided in addition to formula,", 
             "using only formula"))
   }
   
@@ -1424,7 +1436,9 @@ maaslin_fit = function(params_and_data_and_formula) {
       correction = correction,
       save_models = param_list[["save_models"]],
       augment = param_list[["augment"]],
-      cores = param_list[["cores"]]
+      cores = param_list[["cores"]],
+      median_adjust = param_list[["median_adjust_abundance"]],
+      median_adjust_threshold = param_list[["median_adjust_abundance_threshold"]]
     )
   
   #################################################################
@@ -1462,7 +1476,9 @@ maaslin_fit = function(params_and_data_and_formula) {
       correction = param_list[["correction"]],
       save_models = param_list[["save_models"]],
       augment = param_list[["augment"]],
-      cores = param_list[["cores"]]
+      cores = param_list[["cores"]],
+      median_adjust = param_list[["median_adjust_prevalence"]],
+      median_adjust_threshold = param_list[["median_adjust_prevalence_threshold"]]
     )
 
   logging::loginfo("Counting total values for each feature")
@@ -1496,239 +1512,6 @@ maaslin_fit = function(params_and_data_and_formula) {
               "fit_data_non_zero" = fit_data_non_zero,
               "fit_data_binary" = fit_data_binary
               ))
-}
-
-maaslin_fit_abun_only = function(params_and_data_and_formula) {
-  param_list <- maaslin_parse_param_list(params_and_data_and_formula[["param_list"]])
-  analysis_method <- param_list[["analysis_method"]]
-  correction <- param_list[["correction"]]
-  fit_data_binary <- params_and_data_and_formula[["fit_data_binary"]]
-  
-  logging::loginfo(
-    "Running selected analysis method: %s", analysis_method)
-  
-  prevalence_mask <- ifelse(params_and_data_and_formula[["filtered_data"]] > 
-                              param_list[["zero_threshold"]], 1, 0)
-  
-  #######################
-  # For non-zero models #
-  #######################
-  
-  fit_data_non_zero <-
-    fit.model(
-      features = params_and_data_and_formula[["filtered_data_norm_transformed"]],
-      metadata = params_and_data_and_formula[["metadata"]],
-      model = analysis_method,
-      formula = params_and_data_and_formula[["formula"]][["formula"]],
-      random_effects_formula = params_and_data_and_formula[["formula"]][["random_effects_formula"]],
-      correction = correction,
-      save_models = param_list[["save_models"]],
-      augment = param_list[["augment"]],
-      cores = param_list[["cores"]]
-    )
-  
-  #################################################################
-  # Count the total values for each feature (untransformed space) #
-  #################################################################
-  
-  logging::loginfo("Counting total values for each feature")
-  
-  fit_data_non_zero$results$N <-
-    apply(
-      fit_data_non_zero$results,
-      1,
-      FUN = function(x)
-        length(params_and_data_and_formula[["filtered_data_norm_transformed"]][, x[1]])
-    )
-  fit_data_non_zero$results$N.not.zero <-
-    apply(
-      fit_data_non_zero$results,
-      1,
-      FUN = function(x)
-        length(which(params_and_data_and_formula[["filtered_data"]][, x[1]] > 0))
-    )
-  
-  fit_data_binary$results <- fit_data_binary$results[,!colnames(fit_data_binary$results) %in% c("pval_joint", "qval_joint", "controlled_for")]
-  colnames(fit_data_binary$results)[colnames(fit_data_binary$results) == 'pval_single'] <- 'pval'
-  colnames(fit_data_binary$results)[colnames(fit_data_binary$results) == 'qval_single'] <- 'qval'
-  results <- add_joint_signif(fit_data_non_zero, fit_data_binary, analysis_method, correction)
-  fit_data_non_zero$results <- results[[1]]
-  fit_data_binary$results <- results[[2]]
-  
-  return(list("param_list" = params_and_data_and_formula[["param_list"]], 
-              "data" = params_and_data_and_formula[["data"]], 
-              "metadata" = params_and_data_and_formula[["metadata"]],
-              "unfiltered_metadata" = params_and_data_and_formula[["unfiltered_metadata"]], 
-              "filtered_data" = params_and_data_and_formula[["filtered_data"]], 
-              "filtered_data_norm_transformed" = params_and_data_and_formula[["filtered_data_norm_transformed"]],
-              "formula" = params_and_data_and_formula[["formula"]],
-              "fit_data_non_zero" = fit_data_non_zero,
-              "fit_data_binary" = fit_data_binary
-  ))
-}
-
-########################################################
-# Fit and drop terms to remove compositionality effect #
-########################################################
-
-maaslin_fit_iterative = function(params_and_data_and_formula) {
-
-  # Get the original fit
-  outputs <- maaslin_fit(params_and_data_and_formula)
-
-  outputs$fit_data_non_zero$results$controlled_for <- ""
-  outputs$fit_data_binary$results$controlled_for <- ""
-  
-  stored_binary_results <- outputs$fit_data_binary
-  
-  # Pull the most impactful feature with a significant q-value
-  max_significance <- params_and_data_and_formula[["param_list"]]$max_significance
-  signif_current <- rbind(outputs$fit_data_non_zero$results[outputs$fit_data_non_zero$results$qval_joint < max_significance, c("feature", "coef", "qval_single")],
-                          outputs$fit_data_binary$results[outputs$fit_data_binary$results$qval_joint < max_significance, c("feature", "coef", "qval_single")])
-  signif_current <- signif_current[signif_current$qval_single < max_significance,]
-  
-  if (nrow(signif_current) > 0) {
-    feature_lowest_q <- signif_current$feature[which.max(abs(signif_current$coef))]
-    
-    tmp_line <- outputs$fit_data_non_zero$results[
-      outputs$fit_data_non_zero$results$feature == feature_lowest_q,]
-    tmp_line2 <- outputs$fit_data_binary$results[
-      outputs$fit_data_binary$results$feature == feature_lowest_q,]
-    
-    tmp_resid <- outputs$fit_data_non_zero$residuals[feature_lowest_q,]
-    tmp_resid2 <- outputs$fit_data_binary$residuals[feature_lowest_q,]
-    
-    tmp_fitted <- outputs$fit_data_non_zero$fitted[feature_lowest_q,]
-    tmp_fitted2 <- outputs$fit_data_binary$fitted[feature_lowest_q,]
-  } else {
-    tmp_line <- NULL
-  }
-  
-  outputs[["param_list"]][['output']] <- paste0(gsub("/$", "", outputs[["param_list"]][['output']]),
-                                                    '/iteration_', 0)
-  maaslin_write_results(outputs)
-  outputs[["param_list"]][['output']] <- gsub("\\/iteration_0", "", outputs[["param_list"]][['output']])
-  
-  # Create a matrix of the low q-value removed features
-  drop_vec <- c()
-  growing_results_mat <- NULL
-  growing_results_mat2 <- NULL
-  growing_resid_mat <- NULL
-  growing_resid_mat2 <- NULL
-  growing_fitted_mat <- NULL
-  growing_fitted_mat2 <- NULL
-  while(nrow(signif_current) > 0 & length(tmp_line$qval_joint) > 0) {
-    drop_vec <- c(drop_vec, feature_lowest_q)
-    
-    # Remove the feature from the dataframe and refit
-    params_and_data_and_formula_tmp <- params_and_data_and_formula
-    
-    # Check there are at least 2 taxa remaining
-    if (sum(!(colnames(params_and_data_and_formula_tmp[["data"]]) %in% drop_vec)) < 2) {
-      drop_vec <- drop_vec[-length(drop_vec)]
-      break
-    }
-    
-    params_and_data_and_formula_tmp[["data"]] <- 
-      params_and_data_and_formula_tmp[["data"]][,-which(colnames(params_and_data_and_formula_tmp[["data"]]) %in% drop_vec)]
-    
-    params_and_data_and_formula_tmp <- list("param_list" = params_and_data_and_formula_tmp[["param_list"]], 
-                                            "data" = params_and_data_and_formula_tmp[["data"]], 
-                                            "metadata" = params_and_data_and_formula_tmp[["metadata"]], 
-                                            "formula" = params_and_data_and_formula_tmp[["formula"]])
-    
-    # Re-filter, standardize, normalize, transform, and fit
-    intermediate_params <- params_and_data_and_formula_tmp %>%
-      maaslin_filter_and_standardize() %>%
-      maaslin_normalize() %>%
-      maaslin_transform()
-    
-    # Make sure there are at least 2 taxa remaining
-    if (ncol(intermediate_params[["filtered_data_norm_transformed"]]) < 2) {
-      drop_vec <- drop_vec[-length(drop_vec)]
-      break
-    }
-    
-    # Add line to the list of removed features
-    if (is.null(growing_results_mat)) {
-      growing_results_mat <- tmp_line
-      growing_results_mat2 <- tmp_line2
-      growing_resid_mat <- tmp_resid
-      growing_resid_mat2 <- tmp_resid2
-      growing_fitted_mat <- tmp_fitted
-      growing_fitted_mat2 <- tmp_fitted2
-    } else {
-      growing_results_mat <- rbind(growing_results_mat, tmp_line)
-      growing_results_mat2 <- rbind(growing_results_mat2, tmp_line2)
-      growing_resid_mat <- rbind(growing_resid_mat, tmp_resid)
-      growing_resid_mat2 <- rbind(growing_resid_mat2, tmp_resid2)
-      growing_fitted_mat <- rbind(growing_fitted_mat, tmp_fitted)
-      growing_fitted_mat2 <- rbind(growing_fitted_mat2, tmp_fitted2)
-    }
-    
-    stored_binary_results$results <- stored_binary_results$results[
-      stored_binary_results$results$feature != feature_lowest_q, , drop=F]
-    stored_binary_results$residuals <- stored_binary_results$residuals[
-      rownames(stored_binary_results$residuals) != feature_lowest_q, , drop=F]
-    stored_binary_results$fitted <- stored_binary_results$fitted[
-      rownames(stored_binary_results$fitted) != feature_lowest_q, , drop=F]
-    intermediate_params[['fit_data_binary']] <- stored_binary_results
-    outputs_tmp <- maaslin_fit_abun_only(intermediate_params)
-    
-    outputs_tmp$fit_data_non_zero$results$controlled_for <- paste0(drop_vec, collapse = ",")
-    outputs_tmp$fit_data_binary$results$controlled_for <- paste0(drop_vec, collapse = ",")
-    
-    outputs_tmp[["param_list"]][['output']] <- paste0(gsub("/$", "", outputs_tmp[["param_list"]][['output']]),
-                                                      '/iteration_', length(drop_vec))
-    maaslin_write_results(outputs_tmp)
-    
-    stored_binary_results <- outputs_tmp$fit_data_binary
-    
-    signif_current <- rbind(outputs_tmp$fit_data_non_zero$results[outputs_tmp$fit_data_non_zero$results$qval_joint < max_significance, c("feature", "coef", "qval_single")],
-                            outputs_tmp$fit_data_binary$results[outputs_tmp$fit_data_binary$results$qval_joint < max_significance, c("feature", "coef", "qval_single")])
-    signif_current <- signif_current[signif_current$qval_single < max_significance,]
-    if (nrow(signif_current) > 0) {
-      feature_lowest_q <- signif_current$feature[which.max(abs(signif_current$coef))]
-      tmp_line <- outputs_tmp$fit_data_non_zero$results[
-        outputs_tmp$fit_data_non_zero$results$feature == feature_lowest_q,]
-      tmp_line2 <- outputs_tmp$fit_data_binary$results[
-        outputs_tmp$fit_data_binary$results$feature == feature_lowest_q,]
-      tmp_resid <- outputs_tmp$fit_data_non_zero$residuals[feature_lowest_q,]
-      tmp_resid2 <- outputs_tmp$fit_data_binary$residuals[feature_lowest_q,]
-      tmp_fitted <- outputs_tmp$fit_data_non_zero$fitted[feature_lowest_q,]
-      tmp_fitted2 <- outputs_tmp$fit_data_binary$fitted[feature_lowest_q,]
-    }
-  }
-
-  # Add significant features
-  if (!is.null(growing_results_mat)) {
-    outputs$fit_data_non_zero$results <- rbind(growing_results_mat, outputs_tmp$fit_data_non_zero$results)
-    outputs$fit_data_non_zero$results <- outputs$fit_data_non_zero$results[order(outputs$fit_data_non_zero$results$qval_joint),]
-    outputs$fit_data_binary$results <- rbind(growing_results_mat2, outputs_tmp$fit_data_binary$results)
-    outputs$fit_data_binary$results <- outputs$fit_data_binary$results[order(outputs$fit_data_binary$results$qval_joint),]
-    
-    if (is.null(dim(growing_resid_mat))) { # Not a matrix because only a single association was significant
-      growing_resid_mat <- t(as.matrix(growing_resid_mat))
-      growing_resid_mat2 <- t(as.matrix(growing_resid_mat2))
-      growing_fitted_mat <- t(as.matrix(growing_fitted_mat))
-      growing_fitted_mat2 <- t(as.matrix(growing_fitted_mat2))
-    }
-    
-    rownames(growing_resid_mat) = rownames(growing_resid_mat2) = rownames(growing_fitted_mat) = 
-      rownames(growing_fitted_mat2) <- drop_vec
-    
-    outputs$fit_data_non_zero$residuals <- 
-      bind_and_reorder(growing_resid_mat, outputs_tmp$fit_data_non_zero$residuals, params_and_data_and_formula[['data']])
-    outputs$fit_data_binary$residuals <- 
-      bind_and_reorder(growing_resid_mat2, outputs_tmp$fit_data_binary$residuals, params_and_data_and_formula[['data']])
-    
-    outputs$fit_data_non_zero$fitted <- 
-      bind_and_reorder(growing_fitted_mat, outputs_tmp$fit_data_non_zero$fitted, params_and_data_and_formula[['data']])
-    outputs$fit_data_binary$fitted <- 
-      bind_and_reorder(growing_fitted_mat2, outputs_tmp$fit_data_binary$fitted, params_and_data_and_formula[['data']])
-  }
-  
-  return(outputs)
 }
 
 ###########################
@@ -1865,14 +1648,9 @@ Maaslin3 <- function(param_list = list()) {
     maaslin_normalize() %>%
     maaslin_transform()
   
-  if (params_tmp_2[['param_list']][['iterative_mode']]) {
-    params_data_formula_fit <- params_and_data_and_formula %>%
-      maaslin_fit_iterative()
-  } else {
-    params_data_formula_fit <- params_and_data_and_formula %>%
-      maaslin_fit()
-  }
-  
+  params_data_formula_fit <- params_and_data_and_formula %>%
+    maaslin_fit()
+
   maaslin_plot_results(params_data_formula_fit)
   
   return(params_data_formula_fit)
