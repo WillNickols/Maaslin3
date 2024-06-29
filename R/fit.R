@@ -1,3 +1,4 @@
+#!/usr/bin/env Rscript
 # Load Required Packages
 for (lib in c(
   'dplyr',
@@ -36,6 +37,7 @@ safe_deparse <- function(formula) {
   paste0(trimws(deparse(formula)), collapse = " ")
 }
 
+# Extract a predictor of the form: predictor_type(variable)
 extract_special_predictor <- function(formula, predictor_type) {
   groups <- regmatches(safe_deparse(formula), gregexpr(paste0(predictor_type, "\\((.*?)\\)"), safe_deparse(formula)))[[1]]
   groups <- gsub("\\)$", "", gsub(paste0("^", predictor_type, "\\("), "", groups))
@@ -48,41 +50,48 @@ extract_special_predictor <- function(formula, predictor_type) {
   return(list(formula, predictor_type = groups))
 }
 
-# Get all fixed effects
-get_fixed_effects <- function(formula, random_effects_formula, dat_sub, groups, omps) {
+# Get all fixed effects, not assuming a model has or can be fit
+get_fixed_effects <- function(formula, random_effects_formula, dat_sub, groups, ordereds) {
   names_to_include <- c()
   if (is.null(random_effects_formula)) { # Fixed and group effects only
     names_to_include <- colnames(model.matrix(formula(gsub("^expr ", "", safe_deparse(formula))), dat_sub))
     names_to_include <- names_to_include[names_to_include != "(Intercept)"]
   } else { # Random effects
-    pattern <- paste0("\\b", paste(gsub("\\|", "\\\\|", findbars(formula(gsub("^expr ", "", safe_deparse(formula))))), collapse = "|"), "\\b")
+    patterns <- paste0("(", unlist(findbars(formula(gsub("^expr ", "", safe_deparse(formula))))), ")")
     
-    fixed_effects_only <- gsub(pattern, "", 
-                               paste0(trimws(safe_deparse(formula(gsub("^expr ", "", safe_deparse(formula))))), collapse = " "), 
-                               ignore.case = TRUE)
-    fixed_effects_only <- trimws(gsub("\\(\\)", "", fixed_effects_only))
-    while(grepl("\\+$", fixed_effects_only)) {
-      fixed_effects_only <- trimws(gsub("\\+$", "", fixed_effects_only))
+    for (pattern in patterns) {
+      fixed_effects_only <- gsub(pattern, "", 
+                       paste0(trimws(safe_deparse(formula(gsub("^expr ", "", safe_deparse(formula))))), collapse = " "), 
+                       fixed = TRUE)
+      fixed_effects_only <- gsub("[+ ]+$", "", fixed_effects_only)
+      fixed_effects_only <- gsub("\\+\\s*\\++", "+", fixed_effects_only)
+      formula <- formula(fixed_effects_only)
     }
     
-    names_to_include <- colnames(model.matrix(formula(fixed_effects_only), dat_sub))
+    names_to_include <- colnames(model.matrix(formula, dat_sub))
     names_to_include <- names_to_include[names_to_include != "(Intercept)"]
   }
-  omp_levels <- c()
-  for (omp in omps) {
-    omp_levels <- c(omp_levels, paste0(omp, levels(dat_sub[[omp]])[-1]))
+  
+  ordered_levels <- c()
+  for (ordered in ordereds) {
+    ordered_levels <- c(ordered_levels, paste0(ordered, levels(dat_sub[[ordered]])[-1]))
   }
   
-  names_to_include <- c(names_to_include, groups, omp_levels)
+  names_to_include <- c(names_to_include, groups, ordered_levels)
   return(names_to_include)
 }
 
+# Get non-baseline names for all non-numeric columns
 get_character_cols <- function(dat_sub) {
   all_factors <- c()
   for (col in colnames(dat_sub)) {
     if (!is.numeric(dat_sub[,col])) {
-      factor_levels <- levels(factor(dat_sub[,col]))
-      # All factor levels except basline
+      if (is.factor(dat_sub[,col])) {
+        factor_levels <- levels(dat_sub[,col])
+      } else {
+        factor_levels <- levels(factor(dat_sub[,col]))
+      }
+      # All factor levels except baseline
       all_factors <- c(all_factors, paste0(col, unique(factor_levels[-1])))
     }
   }
@@ -100,13 +109,15 @@ add_joint_signif <- function(fit_data_non_zero, fit_data_binary, analysis_method
   # Join and check linear and logistic pieces
   merged_signif <- full_join(unique(fit_data_binary_signif), unique(fit_data_non_zero_signif), 
                              by=c("feature", "metadata", "value", "name"))
+  
+  # Stop everything and show the difference between the logistic and linear models fit
   if (nrow(merged_signif) != nrow(unique(fit_data_binary_signif)) | nrow(merged_signif) != nrow(unique(fit_data_non_zero_signif))) {
     print(nrow(unique(merged_signif)))
     print(nrow(unique(fit_data_binary_signif)))
     print(nrow(unique(fit_data_non_zero_signif)))
     print(anti_join(unique(fit_data_binary_signif), unique(fit_data_non_zero_signif), by=c("feature", "metadata", "value", "name")))
     print(anti_join(unique(fit_data_non_zero_signif), unique(fit_data_binary_signif), by=c("feature", "metadata", "value", "name")))
-    stop("Merged significance tables have different associations")
+    stop("Merged significance tables have different associations. This is likely a package error due to unexpected data or models.")
   }
   
   # Create a combined p-value
@@ -129,8 +140,8 @@ add_joint_signif <- function(fit_data_non_zero, fit_data_binary, analysis_method
 append_joint <- function(outputs, merged_signif) {
   merged_signif <- merged_signif[,c("feature", "metadata", "value", "name", "pval_joint", "qval_joint")]
   tmp_colnames <- colnames(outputs$results)
-  tmp_colnames <- case_when(tmp_colnames == "pval" ~ "pval_single",
-                            tmp_colnames == "qval" ~ "qval_single",
+  tmp_colnames <- case_when(tmp_colnames == "pval" ~ "pval_individual",
+                            tmp_colnames == "qval" ~ "qval_individual",
                             TRUE ~ tmp_colnames)
   colnames(outputs$results) <- tmp_colnames
   
@@ -153,8 +164,8 @@ fit.model <- function(
     save_models = FALSE,
     augment = FALSE,
     cores = 1,
-    median_adjust = FALSE,
-    median_adjust_threshold = 0.2) {
+    median_comparison = FALSE,
+    median_comparison_threshold = 0.25) {
   function_vec <- c("augment_data", "safe_deparse", "extract_special_predictor", "get_fixed_effects", "get_character_cols", 
                     "add_joint_signif", "append_joint")
       
@@ -175,14 +186,16 @@ fit.model <- function(
   formula <- extract_special_predictor_out[[1]]
   groups <- extract_special_predictor_out[[2]]
   
-  # Extract omp components
-  extract_special_predictor_out <- extract_special_predictor(formula, 'omp')
+  # Extract ordered components
+  extract_special_predictor_out <- extract_special_predictor(formula, 'ordered')
   formula <- extract_special_predictor_out[[1]]
-  omps <- extract_special_predictor_out[[2]]
+  ordereds <- extract_special_predictor_out[[2]]
   
   #############################################################
   # Determine the function and summary for the model selected #
   #############################################################
+  
+  optimizers <- c('nloptwrap', 'nlminbwrap', 'bobyqa', 'Nelder_Mead')
   
   ################
   # Linear Model #
@@ -212,10 +225,30 @@ fit.model <- function(
         ranef_function <- lme4::ranef
         model_function <-
               function(formula, data, na.action) {
-                  return(lmerTest::lmer(
+                index <- 1
+                
+                while (index < length(optimizers)) {
+                  tryCatch({
+                    return(lmerTest::lmer(
                       formula(formula), 
                       data = data, 
-                      na.action = na.action))
+                      na.action = na.action, 
+                      control = lmerControl(optimizer = optimizers[index])))
+                  }, warning = function(w) {
+                    'warning'
+                  }, error = function(e) {
+                    'error'
+                  })
+                  
+                  # Something warned or errored if here
+                  index <- index + 1
+                }
+                
+                return(lmerTest::lmer(
+                  formula(formula), 
+                  data = data, 
+                  na.action = na.action, 
+                  control = lmerControl(optimizer = optimizers[index])))
               }
           summary_function <- function(fit, names_to_include) {
               lm_summary <- coef(summary(fit))
@@ -284,25 +317,99 @@ fit.model <- function(
           function(formula, mm, weight_scheme, na.action) {
             weight_sch_current <<- weight_scheme # Needs to be global variable ?!
             
-            glm_out <- lme4::glmer(
-              formula(formula), 
-              data = mm, 
-              family = 'binomial',
-              na.action = na.action,
-              weights = weight_sch_current)
+            index <- 1
             
-            remove(weight_sch_current, pos = ".GlobalEnv") # Stop being global
+            while (index < length(optimizers)) {
+              glm_out <- tryCatch({
+                withCallingHandlers({ # Catch non-integer # successes first
+                  fit1 <- lme4::glmer(
+                    formula(formula), 
+                    data = mm, 
+                    family = 'binomial',
+                    na.action = na.action,
+                    weights = weight_sch_current,
+                    control = glmerControl(optimizer = optimizers[index]))
+                }, warning=function(w) {
+                  if (w$message == "non-integer #successes in a binomial glm!") {
+                    # Still worked
+                    invokeRestart("muffleWarning")
+                  }
+                  return(fit1)
+                })
+              }, warning = function(w) {
+                'warning'
+              }, error = function(e) {
+                'error'
+              })
+              
+              # Something warned or errored if here
+              if (is.character(glm_out)) {
+                index <- index + 1
+              } else  {
+                break
+              }
+            }
             
-            return(glm_out)
+            if (is.character(glm_out)) {
+              withCallingHandlers({ # Catch non-integer # successes first
+                  fit1 <- lme4::glmer(
+                    formula(formula), 
+                    data = mm, 
+                    family = 'binomial',
+                    na.action = na.action,
+                    weights = weight_sch_current,
+                    control = glmerControl(optimizer = optimizers[index]))
+              }, warning=function(w) {
+                if (w$message == "non-integer #successes in a binomial glm!") {
+                  # Still worked
+                  invokeRestart("muffleWarning")
+                }
+                return(fit1)
+              })
+              remove(weight_sch_current, pos = ".GlobalEnv")
+              return(fit1)
+            } else  {
+              remove(weight_sch_current, pos = ".GlobalEnv")
+              return(glm_out)
+            }
           }
       } else {
         model_function <-
           function(formula, data, na.action) {
-            return(lme4::glmer(
-              formula(formula), 
-              data = data, 
-              family = 'binomial',
-              na.action = na.action))
+            index <- 1
+            
+            while (index < length(optimizers)) {
+              glm_out <- tryCatch({
+                lme4::glmer(
+                  formula(formula), 
+                  data = data, 
+                  family = 'binomial',
+                  na.action = na.action,
+                  control = glmerControl(optimizer = optimizers[index]))
+              }, warning = function(w) {
+                'warning'
+              }, error = function(e) {
+                'error'
+              })
+              
+              # Something warned or errored if here
+              if (is.character(glm_out)) {
+                index <- index + 1
+              } else  {
+                break
+              }
+            }
+            
+            if (is.character(glm_out)) {
+              return(lme4::glmer(
+                formula(formula), 
+                data = data, 
+                family = 'binomial',
+                na.action = na.action,
+                control = glmerControl(optimizer = optimizers[index])))
+            } else  {
+              return(glm_out)
+            }
           }
       }
       summary_function <- function(fit, names_to_include) {
@@ -367,7 +474,7 @@ fit.model <- function(
       output <- list()
       
       # List fixed effects that will be included
-      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, omps)
+      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, ordereds)
       
       # Build outputs
       output$para <- as.data.frame(matrix(NA, nrow = length(names_to_include), ncol = 3))
@@ -388,9 +495,9 @@ fit.model <- function(
     # Missing first factor level
     missing_first_factor_level <- FALSE
     for (col in colnames(dat_sub)) {
-      if(!is.numeric(dat_sub[,col])) {
-        if (all(is.na(dat_sub$expr[dat_sub[,col] == levels(factor(dat_sub[,col]))[1]]))) {
-          fixed_effects <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, omps)
+      if(is.factor(dat_sub[,col])) {
+        if (all(is.na(dat_sub$expr[dat_sub[,col] == levels(dat_sub[,col])[1]]))) {
+          fixed_effects <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, ordereds)
           if (col %in% substr(fixed_effects, 1, nchar(col))) {
             missing_first_factor_level <- TRUE
           }
@@ -402,7 +509,7 @@ fit.model <- function(
       output <- list()
       
       # List fixed effects that will be included
-      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, omps)
+      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, ordereds)
       
       # Build outputs
       output$para <- as.data.frame(matrix(NA, nrow = length(names_to_include), ncol = 3))
@@ -426,7 +533,7 @@ fit.model <- function(
       fit1 <- tryCatch({
         withCallingHandlers({
           withCallingHandlers({ # Catch non-integer # successes first
-            formula_new <- formula(paste0(c(safe_deparse(formula), groups, omps), collapse = " + "))
+            formula_new <- formula(paste0(c(safe_deparse(formula), groups, ordereds), collapse = " + "))
             
             # Augment data
             augmented_data <- augment_data(formula_new, random_effects_formula, dat_sub)
@@ -478,7 +585,7 @@ fit.model <- function(
         error_message <- NA
         fit1 <- tryCatch({
           withCallingHandlers({
-            formula_new <- formula(paste0(c(safe_deparse(formula), groups, omps), collapse = " + "))
+            formula_new <- formula(paste0(c(safe_deparse(formula), groups, ordereds), collapse = " + "))
             
             fit1 <-
               model_function(
@@ -523,7 +630,7 @@ fit.model <- function(
     low_n_error <- FALSE
     if (all(!inherits(fit, "try-error"))) {
       names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, character(0), character(0))
-      output$para <- summary_function(fit, c('(Intercept)', names_to_include))
+      output$para <- suppressWarnings(summary_function(fit, c('(Intercept)', names_to_include))) # Suppress warnings about variance-covariance matrix calculation
       output$para <- output$para[names_to_include, , drop=F]
       
       n_uni_cols <- nrow(output$para)
@@ -592,19 +699,20 @@ fit.model <- function(
         }
       }
       
-      if (length(omps) > 0) {
-        for (omp in omps) {
-          omp_levels <- paste0(omp, levels(dat_sub[[omp]])[-1])
+      if (length(ordereds) > 0) {
+        for (ordered in ordereds) {
+          ordered_levels <- paste0(ordered, levels(dat_sub[[ordered]])[-1])
           output$para <- tryCatch({
             withCallingHandlers({ # Catch non-integer # successes first
               if(is.null(random_effects_formula)) { # Fixed effects
-                if (any(!paste0(omp, levels(dat_sub[[omp]])[-1]) %in% names(coef(fit)))) {
-                  stop("Some omp levels are missing")
+                if (any(!ordered_levels %in% names(coef(fit)))) {
+                  fit_and_message[[length(fit_and_message)]] <- "Error: Some ordered levels are missing"
+                  stop("Some ordered levels are missing")
                 }
                 
-                contrast_mat <- matrix(0, ncol = length(coef(fit)), nrow = length(levels(dat_sub[[omp]])[-1]))
+                contrast_mat <- matrix(0, ncol = length(coef(fit)), nrow = length(levels(dat_sub[[ordered]])[-1]))
                 
-                cols_to_add_1s <- which(names(coef(fit)) %in% paste0(omp, levels(dat_sub[[omp]])[-1]))
+                cols_to_add_1s <- which(names(coef(fit)) %in% ordered_levels)
                 contrast_mat[1, cols_to_add_1s[1]] <- 1
                 for (i in seq_along(cols_to_add_1s[-1])) {
                   contrast_mat[i + 1, cols_to_add_1s[-1][i]] <- 1
@@ -627,13 +735,14 @@ fit.model <- function(
                                                      error = function(err) { NA }))
                 }
               } else { # Random effects linear
-                if (any(!paste0(omp, levels(dat_sub[[omp]])[-1]) %in% names(fixef(fit)))) {
-                  stop("Some omp levels are missing")
+                if (any(!ordered_levels %in% names(fixef(fit)))) {
+                  fit_and_message[[length(fit_and_message)]] <- "Error: Some ordered levels are missing"
+                  stop("Some ordered levels are missing")
                 }
                 
-                contrast_mat <- matrix(0, ncol = length(fixef(fit)), nrow = length(levels(dat_sub[[omp]])[-1]))
+                contrast_mat <- matrix(0, ncol = length(fixef(fit)), nrow = length(levels(dat_sub[[ordered]])[-1]))
                 
-                cols_to_add_1s <- which(names(fixef(fit)) %in% paste0(omp, levels(dat_sub[[omp]])[-1]))
+                cols_to_add_1s <- which(names(fixef(fit)) %in% ordered_levels)
                 contrast_mat[1, cols_to_add_1s[1]] <- 1
                 for (i in seq_along(cols_to_add_1s[-1])) {
                   contrast_mat[i + 1, cols_to_add_1s[-1][i]] <- 1
@@ -674,8 +783,8 @@ fit.model <- function(
               
               tmp_output <- rbind(output$para, list(coefs_new, 
                                                     sigmas_new,
-                                                    pvals_new, omp_levels))
-              rownames(tmp_output)[(nrow(tmp_output) - length(omp_levels) + 1) : nrow(tmp_output)] <- omp_levels
+                                                    pvals_new, ordered_levels))
+              rownames(tmp_output)[(nrow(tmp_output) - length(ordered_levels) + 1) : nrow(tmp_output)] <- ordered_levels
               tmp_output
             }, warning=function(w) {
               if (w$message == "non-integer #successes in a binomial glm!") {
@@ -687,16 +796,16 @@ fit.model <- function(
           },
           warning = function(w) {
             org_row_num <- nrow(output$para)
-            output$para[(org_row_num + 1) : (org_row_num + length(omp_levels)), 1:3] <- NA
-            output$para[(org_row_num + 1) : (org_row_num + length(omp_levels)), 4] <- omp_levels
-            rownames(output$para)[(org_row_num + 1) : (org_row_num + length(omp_levels))] <- omp_levels
+            output$para[(org_row_num + 1) : (org_row_num + length(ordered_levels)), 1:3] <- NA
+            output$para[(org_row_num + 1) : (org_row_num + length(ordered_levels)), 4] <- ordered_levels
+            rownames(output$para)[(org_row_num + 1) : (org_row_num + length(ordered_levels))] <- ordered_levels
             output$para
           },
           error = function(err) {
             org_row_num <- nrow(output$para)
-            output$para[(org_row_num + 1) : (org_row_num + length(omp_levels)), 1:3] <- NA
-            output$para[(org_row_num + 1) : (org_row_num + length(omp_levels)), 4] <- omp_levels
-            rownames(output$para)[(org_row_num + 1) : (org_row_num + length(omp_levels))] <- omp_levels
+            output$para[(org_row_num + 1) : (org_row_num + length(ordered_levels)), 1:3] <- NA
+            output$para[(org_row_num + 1) : (org_row_num + length(ordered_levels)), 4] <- ordered_levels
+            rownames(output$para)[(org_row_num + 1) : (org_row_num + length(ordered_levels))] <- ordered_levels
             output$para
           })
         }
@@ -709,7 +818,7 @@ fit.model <- function(
       # }
 
       # Check whether summaries are correct
-      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, omps)
+      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, ordereds)
       if (any(!(names_to_include %in% rownames(output$para)))) {
         
         # Don't worry about dropped factor levels
@@ -750,7 +859,7 @@ fit.model <- function(
           output$ranef <- l
         }
       }
-      if (median_adjust) {
+      if (median_comparison) {
         output$fit <- fit
       } else {
         if (save_models) {
@@ -759,14 +868,13 @@ fit.model <- function(
           output$fit <- NA
         }
       }
-      
-      } else { # Fitting issue
+    } else { # Fitting issue
       logging::logwarn(paste(
         "Fitting problem for feature", 
         x, 
         "returning NA"))
       
-      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, omps)
+      names_to_include <- get_fixed_effects(formula, random_effects_formula, dat_sub, groups, ordereds)
       
       # Store NA values for missing outputs
       output$para <- as.data.frame(matrix(NA, nrow = length(names_to_include), ncol = 3))
@@ -781,10 +889,30 @@ fit.model <- function(
     colnames(output$para) <- c('coef', 'stderr' , 'pval', 'name')
     output$para$feature <- colnames(features)[x]
     output$para$error <- fit_and_message[[length(fit_and_message)]]
-    output$para$error[!is.na(output$para$error) & is.na(output$para$pval)] <- 'Fitting error (NA p-value returned from fitting procedure)'
-    if (low_n_error) {
-      output$para[(n_uni_cols + 1):nrow(output$para),"error"] <- "Too few observations for asymptotic test"
-    }
+    output$para$error[is.na(output$para$error) & is.na(output$para$pval)] <- 'Fitting error (NA p-value returned from fitting procedure)'
+    
+    # Checks for poor model fits or possible linear separability
+    # if (fit_properly & augment & model == 'logistic') {
+    #   cooks_distances <- suppressWarnings(cooks.distance(fit))
+    #   weights_large_cooks_distances <- weight_scheme[!is.na(cooks_distances) & cooks_distances > 1]
+    #   if (mean(weights_large_cooks_distances != 1) > 0.95 & 
+    #       length(weights_large_cooks_distances) > 0.01 * nrow(dat_sub)) {
+    #     output$para$error <- ifelse(!is.na(output$para$error), output$para$error,
+    #                                 paste0(100 * round(mean(weights_large_cooks_distances != 1), 3), 
+    #                                        "% of Cooks distances >1 came from the augmented values, suggesting the model fit is heavily influenced by the data augmentation. Check the model before using resulting small p-values."))
+    #   }
+    # 
+    #   kept_stderr <- output$para$name[!is.na(output$para$stderr)]
+    #   if (any(output$para$stderr[!is.na(output$para$stderr)] < 
+    #           0.01 / apply(model.matrix(fit)[, -1, drop = F], 2, sd)[kept_stderr])) {
+    #     output$para$error <- ifelse(!is.na(output$para$error), output$para$error,
+    #                                 'StdErr is below 0.01/SD(X) for at least one coefficient, suggesting a silent poor model fit. Check the model before using resulting small p-values.')
+    #   }
+    # }
+      
+    # if (low_n_error) {
+    #   output$para[(n_uni_cols + 1):nrow(output$para),"error"] <- "Too few observations for asymptotic test"
+    # }
     
     return(output)
     })
@@ -818,14 +946,17 @@ fit.model <- function(
   names(fits) <- colnames(features)
   
   # Adjust the significance levels based on tests against the median
-  if (median_adjust) {
-    if (length(omps) > 0) {
-      omp_levels <- c()
-      for (omp in omps) {
-        omp_levels <- c(omp_levels, paste0(omp, levels(metadata[[omp]])[-1]))
+  if (median_comparison) {
+    logging::loginfo(
+      "Performing tests against medians")
+    
+    if (length(ordereds) > 0) {
+      ordered_levels <- c()
+      for (ordered in ordereds) {
+        ordered_levels <- c(ordered_levels, paste0(ordered, levels(metadata[[ordered]])[-1]))
       }
     } else {
-      omp_levels <- c()
+      ordered_levels <- c()
     }
 
     final_paras <- paras[!is.na(paras$error) | paras$name %in% groups,]
@@ -838,8 +969,8 @@ fit.model <- function(
       cur_median <- median(paras_sub$coef[!is.na(paras_sub$pval) & paras_sub$pval < 0.95], na.rm=T)
       
       pvals_new <- vector()
-      if (metadata_variable %in% omp_levels) {
-        omp <- omps[which(startsWith(metadata_variable, omps))]
+      if (metadata_variable %in% ordered_levels) {
+        ordered <- ordereds[which(startsWith(metadata_variable, ordereds))]
         
         for (feature in paras_sub$feature) {
           if(is.null(random_effects_formula)) { # Fixed effects
@@ -850,27 +981,34 @@ fit.model <- function(
               next
             }
             
-            if (any(!paste0(omp, levels(metadata[[omp]])[-1]) %in% names(coef(cur_fit)))) {
+            if (any(!paste0(ordered, levels(metadata[[ordered]])[-1]) %in% names(coef(cur_fit)))) {
               pvals_new <- c(pvals_new, NA)
               next
+            }
+            
+            mm_variable <- model.matrix(cur_fit)[, metadata_variable]
+            if (any(!unique(mm_variable[!is.na(mm_variable)]) %in% c(0,1))) {
+              median_comparison_threshold_updated <- median_comparison_threshold / sd(mm_variable)
+            } else {
+              median_comparison_threshold_updated <- median_comparison_threshold
             }
             
             if (is.na(coef(cur_fit)[which(names(coef(cur_fit)) == metadata_variable)])) {
               pval_new_current <- NA
             } else if (abs(coef(cur_fit)[which(names(coef(cur_fit)) == metadata_variable)] - 
-                    cur_median) < median_adjust_threshold) {
+                    cur_median) < median_comparison_threshold_updated) {
               pval_new_current <- 1
             } else {
-              contrast_mat <- matrix(0, ncol = length(coef(cur_fit)), nrow = length(levels(metadata[[omp]])[-1]))
+              contrast_mat <- matrix(0, ncol = length(coef(cur_fit)), nrow = length(levels(metadata[[ordered]])[-1]))
               
-              cols_to_add_1s <- which(names(coef(cur_fit)) %in% paste0(omp, levels(metadata[[omp]])[-1]))
+              cols_to_add_1s <- which(names(coef(cur_fit)) %in% paste0(ordered, levels(metadata[[ordered]])[-1]))
               contrast_mat[1, cols_to_add_1s[1]] <- 1
               for (i in seq_along(cols_to_add_1s[-1])) {
                 contrast_mat[i + 1, cols_to_add_1s[-1][i]] <- 1
                 contrast_mat[i + 1, cols_to_add_1s[i]] <- -1
               }
   
-              contrast_vec <- t(matrix(contrast_mat[which(paste0(omp, levels(metadata[[omp]])[-1]) == metadata_variable),]))
+              contrast_vec <- t(matrix(contrast_mat[which(paste0(ordered, levels(metadata[[ordered]])[-1]) == metadata_variable),]))
               pval_new_current <- tryCatch({summary(glht(cur_fit, linfct = contrast_vec, 
                                                                rhs = cur_median))$test$pvalues},
                                                  error = function(err) { NA })
@@ -885,25 +1023,32 @@ fit.model <- function(
               next
             }
             
-            if (any(!paste0(omp, levels(metadata[[omp]])[-1]) %in% names(fixef(cur_fit)))) {
+            if (any(!paste0(ordered, levels(metadata[[ordered]])[-1]) %in% names(fixef(cur_fit)))) {
               pvals_new <- c(pvals_new, NA)
               next
             }
             
-            contrast_mat <- matrix(0, ncol = length(fixef(cur_fit)), nrow = length(levels(metadata[[omp]])[-1]))
-            cols_to_add_1s <- which(names(fixef(cur_fit)) %in% paste0(omp, levels(metadata[[omp]])[-1]))
+            mm_variable <- model.matrix(cur_fit)[, metadata_variable]
+            if (any(!unique(mm_variable[!is.na(mm_variable)]) %in% c(0,1))) {
+              median_comparison_threshold_updated <- median_comparison_threshold / sd(mm_variable)
+            } else {
+              median_comparison_threshold_updated <- median_comparison_threshold
+            }
+            
+            contrast_mat <- matrix(0, ncol = length(fixef(cur_fit)), nrow = length(levels(metadata[[ordered]])[-1]))
+            cols_to_add_1s <- which(names(fixef(cur_fit)) %in% paste0(ordered, levels(metadata[[ordered]])[-1]))
             contrast_mat[1, cols_to_add_1s[1]] <- 1
             for (i in seq_along(cols_to_add_1s[-1])) {
               contrast_mat[i + 1, cols_to_add_1s[-1][i]] <- 1
               contrast_mat[i + 1, cols_to_add_1s[i]] <- -1
             }
-            contrast_vec <- t(matrix(contrast_mat[which(paste0(omp, levels(metadata[[omp]])[-1]) == metadata_variable),]))
+            contrast_vec <- t(matrix(contrast_mat[which(paste0(ordered, levels(metadata[[ordered]])[-1]) == metadata_variable),]))
             
             if (model == "logistic") {
               if (is.na(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)])) {
                 pval_new_current <- NA
               } else if (abs(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)] - 
-                             cur_median) < median_adjust_threshold) {
+                             cur_median) < median_comparison_threshold_updated) {
                 pval_new_current <- 1
               } else {
                 pval_new_current <- tryCatch({summary(glht(cur_fit, linfct = contrast_vec, 
@@ -915,7 +1060,7 @@ fit.model <- function(
               if (is.na(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)])) {
                 pval_new_current <- NA
               } else if (abs(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)] - 
-                             cur_median) < median_adjust_threshold) {
+                             cur_median) < median_comparison_threshold_updated) {
                 pval_new_current <- 1
               } else {
                 pval_new_current <- tryCatch({contest(cur_fit, matrix(contrast_vec, T), rhs = cur_median)[['Pr(>F)']]},
@@ -936,13 +1081,20 @@ fit.model <- function(
               next
             }
             
+            mm_variable <- model.matrix(cur_fit)[, metadata_variable]
+            if (any(!unique(mm_variable[!is.na(mm_variable)]) %in% c(0,1))) {
+              median_comparison_threshold_updated <- median_comparison_threshold / sd(mm_variable)
+            } else {
+              median_comparison_threshold_updated <- median_comparison_threshold
+            }
+            
             contrast_vec <- rep(0, length(coef(cur_fit)))
             contrast_vec[which(names(coef(cur_fit)) == metadata_variable)] <- 1
             
             if (is.na(coef(cur_fit)[which(names(coef(cur_fit)) == metadata_variable)])) {
               pval_new_current <- NA
             } else if (abs(coef(cur_fit)[which(names(coef(cur_fit)) == metadata_variable)] - 
-                           cur_median) < median_adjust_threshold) {
+                           cur_median) < median_comparison_threshold_updated) {
               pval_new_current <- 1
             } else {
               pval_new_current <- tryCatch({summary(glht(fits[[feature]], linfct = matrix(contrast_vec, T), 
@@ -959,6 +1111,13 @@ fit.model <- function(
               next
             }
             
+            mm_variable <- model.matrix(cur_fit)[, metadata_variable]
+            if (any(!unique(mm_variable[!is.na(mm_variable)]) %in% c(0,1))) {
+              median_comparison_threshold_updated <- median_comparison_threshold / sd(mm_variable)
+            } else {
+              median_comparison_threshold_updated <- median_comparison_threshold
+            }
+            
             contrast_vec <- rep(0, length(fixef(cur_fit)))
             contrast_vec[which(names(fixef(cur_fit)) == metadata_variable)] <- 1
             
@@ -966,7 +1125,7 @@ fit.model <- function(
               if (is.na(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)])) {
                 pval_new_current <- NA
               } else if (abs(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)] - 
-                             cur_median) < median_adjust_threshold) {
+                             cur_median) < median_comparison_threshold_updated) {
                 pval_new_current <- 1
               } else {
                 pval_new_current <- tryCatch({summary(glht(fits[[feature]], linfct = matrix(contrast_vec, T), 
@@ -979,7 +1138,7 @@ fit.model <- function(
               if (is.na(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)])) {
                 pval_new_current <- NA
               } else if (abs(fixef(cur_fit)[which(names(fixef(cur_fit)) == metadata_variable)] - 
-                             cur_median) < median_adjust_threshold) {
+                             cur_median) < median_comparison_threshold_updated) {
                 pval_new_current <- 1
               } else {
                 pval_new_current <- tryCatch({contest(cur_fit, matrix(contrast_vec, T), rhs = cur_median)[['Pr(>F)']]},
