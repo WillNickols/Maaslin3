@@ -50,7 +50,7 @@ multcomp
 #### Install using Github and devtools
 ```
 library("devtools")
-install_github("biobakery/MaAsLin3")
+install_github("WillNickols/MaAsLin3")
 library("maaslin3")
 ```
 
