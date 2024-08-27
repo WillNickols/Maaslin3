@@ -1,0 +1,5 @@
+.gitignore
+.git
+.gitattributes
+.DS_Store
+.github

@@ -1,4 +1,20 @@
-# MaAsLin 3
+---
+title: "MaAsLin 3 User Manual"
+author:
+- name: William Nickols
+  email: willnickols@g.harvard.edu
+- name: Jacob Nearing
+  email: nearing@broadinstitute.org
+- name: Sagun Maharjan
+  email: smaharjan@hsph.harvard.edu
+output: html_document
+vignette: >
+    %\VignetteIndexEntry{Manual}
+    %\VignetteEngine{knitr::rmarkdown}
+    %\VignetteEncoding{UTF-8}
+---
+
+## Introduction ##
 
 [**MaAsLin 3**](http://huttenhower.sph.harvard.edu/MaAsLin3) is the next
 generation of **M**a**A**s**L**in (**M**icrobiome **M**ultivariable
@@ -41,6 +57,7 @@ Forum](https://forum.biobakery.org/c/Downstream-analysis-and-statistics/maaslin)
     - [In R](#in-r)
     - [Plot revisions](#plot-revisions)
     - [Command line](#command-line)
+    - [Contrast testing](#contrast-testing)
 - [Options](#options)
     - [Required parameters](#required-parameters)
     - [Model formula](#model-formula)
@@ -62,7 +79,7 @@ function.
 The latest development version of MaAsLin 3 can be installed from GitHub
 using the `devtools` package.
 
-```
+```{r, eval=FALSE, cache = FALSE}
 # Install devtools if not present
 if (!require('devtools', character.only = TRUE)) {
     install.packages('devtools')
@@ -73,7 +90,7 @@ library("devtools")
 install_github("biobakery/maaslin3")
 ```
 
-```
+```{r, eval=TRUE, cache = FALSE, echo=FALSE}
 for (lib in c('maaslin3', 'dplyr', 'ggplot2', 'knitr')) {
     suppressPackageStartupMessages(require(lib, character.only = TRUE))
 }
@@ -283,7 +300,7 @@ includes just some of the fields.
 The following code identifies associations between patient metadata and
 microbial species in the HMP2 cohort.
 
-```
+```{R, echo = TRUE, results = 'hide', warning = FALSE, cache = FALSE}
 # Read abundance table
 taxa_table_name <- system.file("extdata", "HMP2_taxonomy.tsv",
                                 package = "maaslin3")
@@ -319,6 +336,225 @@ fit_out <- maaslin3(input_data = taxa_table,
                     cores = 1,
                     save_models = TRUE)
 ```
+
+The `maaslin3` wrapper function runs all steps at once, but equivalent
+results would be produced from running one step at a time:
+
+```{r, eval=FALSE}
+maaslin_log_arguments(input_data = taxa_table,
+                    input_metadata = metadata,
+                    output = 'hmp2_output',
+                    formula = '~ diagnosis + dysbiosis_state +
+                    antibiotics + age + reads',
+                    normalization = 'TSS',
+                    transform = 'LOG',
+                    augment = TRUE,
+                    standardize = TRUE,
+                    max_significance = 0.1,
+                    median_comparison_abundance = TRUE,
+                    median_comparison_prevalence = FALSE,
+                    max_pngs = 100,
+                    cores = 1)
+
+read_data_list <- maaslin_read_data(taxa_table,
+                                    metadata)
+read_data_list <- maaslin_reorder_data(read_data_list$data,
+                                    read_data_list$metadata)
+
+data <- read_data_list$data
+metadata <- read_data_list$metadata
+
+formulas <- maaslin_check_formula(data,
+                                metadata,
+                                '~ diagnosis + dysbiosis_state +
+                                    antibiotics + age + reads')
+
+formula <- formulas$formula
+random_effects_formula <- formulas$random_effects_formula
+
+normalized_data = maaslin_normalize(data,
+                                    output = 'hmp2_output',
+                                    normalization = 'TSS')
+
+filtered_data = maaslin_filter(normalized_data,
+                            output = 'hmp2_output')
+
+transformed_data = maaslin_transform(filtered_data,
+                                    output = 'hmp2_output',
+                                    transform = 'LOG')
+
+standardized_metadata = maaslin_process_metadata(metadata,
+                                                formula,
+                                                standardize = TRUE)
+
+maaslin_results = maaslin_fit(filtered_data,
+                            transformed_data,
+                            standardized_metadata,
+                            formula,
+                            random_effects_formula,
+                            median_comparison_abundance = TRUE,
+                            median_comparison_prevalence = FALSE,
+                            cores = 1)
+
+maaslin_write_results(output = 'hmp2_output',
+                    maaslin_results$fit_data_abundance,
+                    maaslin_results$fit_data_prevalence,
+                    random_effects_formula,
+                    max_significance = 0.1)
+
+# Invisible to avoid dumping plots
+invisible(maaslin_plot_results(output = 'hmp2_output',
+                            transformed_data,
+                            metadata,
+                            maaslin_results$fit_data_abundance,
+                            maaslin_results$fit_data_prevalence,
+                            normalization = "TSS",
+                            transform = "LOG",
+                            median_comparison_abundance = TRUE,
+                            median_comparison_prevalence = FALSE,
+                            max_significance = 0.1,
+                            max_pngs = 100))
+```
+
+#### Replotting
+
+Once `maaslin3` has been run once, `maaslin_plot_results_from_output`
+can be run to
+(re-)create the plots. This allows the user to plot the associations
+even without having the R object returned by `maaslin_fit` or `maaslin3`
+(e.g., if fitting models through the command line). It is recommended to
+fit models with simple variables names that are robust to formula
+plotting and then convert these into proper names for plotting.
+Likewise, `heatmap_vars` and `coef_plot_vars` can be specified at 
+any point, but it is usually easier to see how the names
+come out first and then choose which metadata variables will go in the
+coefficient plot and which will go in the heatmap afterwards with
+`maaslin_plot_results_from_output`.
+
+```{R, echo = TRUE, results = 'hide', warning = FALSE, cache = FALSE}
+# This section is necessary for updating
+# the summary plot and the association plots
+
+# Rename results file with clean titles
+all_results <- read.csv('hmp2_output/all_results.tsv', sep='\t')
+all_results <- all_results %>%
+    mutate(metadata = case_when(metadata == 'age' ~ 'Age',
+                                metadata == 'antibiotics' ~ 'Abx',
+                                metadata == 'diagnosis' ~ 'Diagnosis',
+                                metadata == 'dysbiosis_state' ~ 'Dysbiosis',
+                                metadata == 'reads' ~ 'Read depth'),
+        value = case_when(value == 'dysbiosis_CD' ~ 'CD',
+                            value == 'dysbiosis_UC' ~ 'UC',
+                            value == 'Yes' ~ 'Used', # Antibiotics
+                            value == 'age' ~ 'Age',
+                            value == 'reads' ~ 'Read depth',
+                            TRUE ~ value),
+        feature = gsub('_', ' ', feature) %>%
+            gsub(pattern = 'sp ', replacement = 'sp. '))
+
+# Write results
+write.table(all_results, 'hmp2_output/all_results.tsv', sep='\t')
+
+# Set the new heatmap and coefficient plot variables and order them
+heatmap_vars = c('Dysbiosis UC', 'Diagnosis UC',
+                'Abx Used', 'Age', 'Read depth')
+coef_plot_vars = c('Dysbiosis CD', 'Diagnosis CD')
+
+# This section is necessary for updating the association plots
+colnames(taxa_table) <- gsub('_', ' ', colnames(taxa_table)) %>%
+    gsub(pattern = 'sp ', replacement = 'sp. ')
+
+# Rename the features in the norm transformed data file
+data_transformed <-
+    read.csv('hmp2_output/features/data_transformed.tsv', sep='\t')
+colnames(data_transformed) <-
+    gsub('_', ' ', colnames(data_transformed)) %>%
+    gsub(pattern = 'sp ', replacement = 'sp. ')
+write.table(data_transformed,
+            'hmp2_output/features/data_transformed.tsv',
+            sep='\t', row.names = FALSE)
+
+# Rename the metadata like in the outputs table
+colnames(metadata) <-
+    case_when(colnames(metadata) == 'age' ~ 'Age',
+            colnames(metadata) == 'antibiotics' ~ 'Abx',
+            colnames(metadata) == 'diagnosis' ~ 'Diagnosis',
+            colnames(metadata) == 'dysbiosis_state' ~ 'Dysbiosis',
+            colnames(metadata) == 'reads' ~ 'Read depth',
+            TRUE ~ colnames(metadata))
+metadata <- metadata %>%
+    mutate(Dysbiosis = case_when(Dysbiosis == 'dysbiosis_UC' ~ 'UC',
+                                Dysbiosis == 'dysbiosis_CD' ~ 'CD',
+                                Dysbiosis == 'none' ~ 'None') %>%
+            factor(levels = c('None', 'UC', 'CD')),
+        Abx = case_when(Abx == 'Yes' ~ 'Used',
+                        Abx == 'No' ~ 'Not used') %>%
+            factor(levels = c('Not used', 'Used')),
+        Diagnosis = case_when(Diagnosis == 'nonIBD' ~ 'non-IBD',
+                                TRUE ~ Diagnosis) %>%
+            factor(levels = c('non-IBD', 'UC', 'CD')))
+
+# Recreate the plots
+scatter_plots <- maaslin_plot_results_from_output(
+    output = 'hmp2_output',
+    metadata,
+    normalization = "TSS",
+    transform = "LOG",
+    median_comparison_abundance = TRUE,
+    median_comparison_prevalence = FALSE,
+    max_significance = 0.1,
+    max_pngs = 100)
+```
+
+In the new summary plot below, we can see that the feature names are
+cleaned up, the metadata names are cleaned up, the set of metadata
+variables used in the coefficient plot is different, and the metadata
+used in the heatmap is reordered. (Make sure to set `include=T` to view
+the plots when knitting the Rmd.)
+```{r, out.width='100%', echo=FALSE, cache = FALSE, include=FALSE}
+knitr::include_graphics("hmp2_output/figures/summary_plot.png")
+```
+
+In the association plots below, the taxa and metadata have been renamed to be
+consistent with the results file from earlier.
+```{r, echo=FALSE, fig.show='hold', cache = FALSE, include=FALSE}
+prefix <- "hmp2_output/figures/association_plots"
+plot_vec <- c("/age/linear/Age_Faecalibacterium prausnitzii_linear.png",
+            "/Dysbiosis/linear/Dysbiosis_Escherichia coli_linear.png",
+            "/age/logistic/Age_Bifidobacterium longum_logistic.png",
+            paste0("/Dysbiosis/logistic/",
+                "Dysbiosis_Faecalibacterium prausnitzii_logistic.png"
+                ))
+knitr::include_graphics(paste0(prefix, plot_vec))
+```
+
+#### Contrast testing
+
+We can also perform contrast testing in MaAsLin 3 to check whether a linear
+combination of the coefficients is significantly different from some constant. 
+Specify a contrast matrix
+with column names matching the coefficient names and rows with the contrasts
+of interest. A separate contrast test will be performed for each row. Note that
+`save_models` must be `TRUE` in the original fit to perform contrast tests.
+
+```{R, echo = TRUE, results = 'hide', warning = FALSE, cache = FALSE}
+contrast_mat <- matrix(c(1, 1, 0, 0, 0, 0, 1, 1), 
+    ncol = 4, nrow = 2, byrow = TRUE)
+    
+colnames(contrast_mat) <- c("diagnosisUC",
+                            "diagnosisCD",
+                            "dysbiosis_statedysbiosis_UC",
+                            "dysbiosis_statedysbiosis_CD")
+                            
+rownames(contrast_mat) <- c("diagnosis_test", "dysbiosis_test")
+
+contrast_mat
+                            
+maaslin_contrast_test(fits = fit_out$fit_data_abundance$fits,
+                        contrast_mat = contrast_mat,
+                        rhs = c(0, 0))
+```
+
 
 #### Command line ####
 
@@ -611,8 +847,8 @@ right scale.
 * `median_comparison_prevalence_threshold` (default `0.25`): Same as
 `median_comparison_abundance_threshold` but applied to the prevalence
 associations.
-* `subtract_median` (default `FALSE`): Subtract the median from 
-the coefficients.
+* `subtract_median` (default `FALSE`): Subtract the median from the 
+coefficients.
 
 #### Plotting parameters ####
 
@@ -660,4 +896,13 @@ save them to an RData file.
 library(maaslin3): there is no package called 'maaslin3'``. How do I fix
 this?
     * Answer: Install the R package and then try loading the library again.
+
+```{R}
+sessionInfo()
+```
+
+```{R}
+# Clean-up generated outputs
+unlink('hmp2_output', recursive = TRUE)
+```
 
