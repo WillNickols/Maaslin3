@@ -24,7 +24,7 @@ metadata and microbial meta-omics features. Relative to MaAsLin 2,
 MaAsLin 3 introduces the ability to quantify and test for **both
 abundance and prevalence associations** while **accounting for
 compositionality**. By incorporating generalized linear models, MaAsLin
-3 accomodates most modern epidemiological study designs including
+3 accommodates most modern epidemiological study designs including
 cross-sectional and longitudinal studies.
 
 If you use the MaAsLin 3 software, please cite our manuscript:
@@ -288,7 +288,7 @@ the median coefficient for a metadatum across the features
 (`median_comparison_abundance`). Since prevalence coefficients do not
 have the same compositional properties, they are instead compared
 against 0 (`median_comparison_prevalence`). See below for a discussion of
-these paremeters.
+these parameters.
 * One CPU is used for fitting (`cores = 1`).
 
 The abundance, prevalence, and variance filtering parameters are not
@@ -475,6 +475,9 @@ indicate model fitting failures or poor fits that should not be trusted,
 but sometimes the warnings can be benign, and the model fit might still
 be reasonable. Users should check associations of interest if they
 produce errors.
+    * With `warn_prevalence=TRUE`, a note will be produced in the error column
+    indicating when prevalence associations are likely induced by abundance 
+    associations. These should be checked visually with the diagnosic visuals.
 2. Despite the error checking, significant results could still result
 from poor model fits. These can usually be diagnosed with the visuals in
 the `association_plots` directory.
