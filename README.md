@@ -13,15 +13,18 @@ cross-sectional and longitudinal studies.
 
 If you use the MaAsLin 3 software, please cite our manuscript:
 
-> William A. Nickols, Jacob T. Nearing, Kelsey N. Thompson, Jiaxian
-Shen, Curtis Huttenhower
-MaAsLin 3: Refining and extending generalized multivariate linear models
-for meta-omic association discovery. (In progress).
+> William A. Nickols, Thomas Kuntz, Jiaxian Shen, Sagun Maharjan, 
+Himel Mallick, Eric A. Franzosa, Kelsey N. Thompson, Jacob T. Nearing, 
+Curtis Huttenhower. MaAsLin 3: Refining and extending generalized 
+multivariable linear models for meta-omic association discovery. 
+bioRxiv 2024.12.13.628459; doi: https://doi.org/10.1101/2024.12.13.628459
 
 ### Support ###
 Check out the [MaAsLin 3
 tutorial](https://github.com/biobakery/biobakery/wiki/MaAsLin3) for an
-overview of analysis options and some example runs.
+overview of analysis options and some example runs. If using vignettes,
+users should start with the `maaslin3_tutorial.Rmd` vignette and then
+refer to the `maaslin3_manual.Rmd` vignette as necessary.
 
 If you have questions, please direct them to the [MaAsLin 3
 Forum](https://forum.biobakery.org/c/Downstream-analysis-and-statistics/maaslin)
@@ -59,19 +62,16 @@ function.
 
 #### Install using GitHub and devtools
 
-The latest development version of MaAsLin 3 can be installed from GitHub
-using the `devtools` package.
+The latest version of MaAsLin 3 can be installed from BiocManager.
 
 ```
-# Install devtools if not present
-if (!require('devtools', character.only = TRUE)) {
-    install.packages('devtools')
-}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 
-# Install MaAsLin 3
-library("devtools")
-install_github("biobakery/maaslin3")
+BiocManager::install("biobakery/maaslin3")
 ```
+
+To compile vignettes yourself, specify `dependencies = TRUE`.
 
 ```
 for (lib in c('maaslin3', 'dplyr', 'ggplot2', 'knitr')) {
@@ -162,13 +162,10 @@ contains all the data and results (see `?maaslin_fit`).
         change in the metadatum variable corresponds to a $\textrm{coef}$ change
         in the log-odds of a feature being present.
         * `pval_individual` is the p-value of the individual association.
-        * `error` lists any errors from the model fitting.
         * `qval_individual` is the false discovery rate (FDR) corrected q-value
         of the individual association. FDR correction is performed over all
-        non-NA p-values in the abundance and prevalence modeling separately.
-        * `model` specifies whether the association is abundance or prevalence.
-        * `N` and `N.not.zero` are the total number of data points and the total
-        number of non-zero data points for the feature.
+        p-values without errors in the abundance and prevalence modeling 
+        together.
         * `pval_joint` and `qval_joint` are the p-value and q-value of the joint
         prevalence and abundance association. The p-value comes from plugging in
         the minimum of the association's abundance and prevalence p-values into
@@ -176,10 +173,14 @@ contains all the data and results (see `?maaslin_fit`).
         abundance or prevalence association would be as extreme as observed if
         there was neither an abundance nor prevalence association between the
         feature and metadatum.
+        * `error` lists any errors from the model fitting.
+        * `model` specifies whether the association is abundance or prevalence.
+        * `N` and `N_not_zero` are the total number of data points and the total
+        number of non-zero data points for the feature.
     * ``significant_results.tsv``
         * This file is a subset of the results in the first file.
-        * It only includes associations with q-values <= to the threshold and no
-        errors.
+        * It only includes associations with joint or individual q-values less
+than or equal to the threshold and no errors.
     * ``features``
         * This folder includes the filtered, normalized, and transformed
         versions of the input feature table.
@@ -387,7 +388,7 @@ of 'variable,reference' semi-colon delimited for multiple variables.
 intercepts. **Random intercept models may produce poor model fits when
 there are fewer than 5 observations per group.** In these scenarios,
 per-group fixed effects should be used and subsequently filtered out.
-See `strata_effects` as well.
+(See `strata_effects` as well.)
     * Random effects models are fit with `lmer` (linear) and `glmer`
 (logistic), and the significance tests come from `lmerTest` and `glmer`
 respectively.
@@ -411,7 +412,9 @@ effects can be included. When a strata variable is included, a
 conditional logistic regression will be run to account for the strata.
 The abundance model will be run with a random intercept in place of the
 strata. Strata can include more than two observations per group. Only
-variables that differ within the groups can be tested.
+variables that differ within the groups can be tested. In general, strata
+effects are not recommended except for advanced users. Fixed or random
+intercepts are recommended instead.
 
 #### Feature specific covariates ####
 Particularly for use in metatranscriptomics workflows, a table of
@@ -434,9 +437,9 @@ writing results, and displaying plots.
 
 #### Analysis options ####
 
-* `min_abundance` (default `0`): Features with abundances of at least
-`min_abundance` in `min_prevalence` of the samples will be included for
-analysis. The threshold is applied before normalization and
+* `min_abundance` (default `0`): Features with abundances of more than
+`min_abundance` in more than `min_prevalence` of the samples will be 
+included for analysis. The threshold is applied after normalization and before
 transformation.
 * `min_prevalence` (default `0`): See above.
 * `zero_threshold` (default `0`): Abundances less than or equal to
@@ -455,7 +458,8 @@ also be used.
 * `transform` (default `LOG`, base 2): The transformation to apply to
 the features after normalization and before analysis. The option `LOG`
 is recommended, but `PLOG` (pseudo-log with a pseudo-count of half the 
-dataset minimum non-zero abundance replacing zeros) and `NONE` can also be used.
+dataset minimum non-zero abundance replacing zeros, particularly for
+metabolomics data) and `NONE` can also be used.
 * `correction` (default `BH`): The correction to obtain FDR-corrected
 q-values from raw p-values. Any valid options for `p.adjust` can be
 used.
@@ -606,14 +610,14 @@ coefficient for a metadata variable across the features. Otherwise, test
 against 0. This is only recommended if the analyst is interested in how
 feature prevalence associations compare to each other or if there is
 likely strong compositionality-induced sparsity.
-* `median_comparison_abundance_threshold` (default `0.25`): Coefficients
+* `median_comparison_abundance_threshold` (default `0`): Coefficients
 within `median_comparison_abundance_threshold` of the median association
 will automatically be counted as insignificant (p-value set to 1) since
 they likely represent compositionality-induced associations. This
 threshold will be divided by the metadata variable's standard deviation
 if the metadatum is continuous to ensure the threshold applies to the
 right scale.
-* `median_comparison_prevalence_threshold` (default `0.25`): Same as
+* `median_comparison_prevalence_threshold` (default `0`): Same as
 `median_comparison_abundance_threshold` but applied to the prevalence
 associations.
 * `subtract_median` (default `FALSE`): Subtract the median from 
@@ -647,13 +651,18 @@ significant associations.
 * `max_pngs` (default `30`): The top `max_pngs` significant associations
 will be plotted.
 
-#### Technical parameters ####
+#### Technical/miscellaneous parameters ####
 
 * `cores` (default `1`): How many cores to use when fitting models.
 (Using multiple cores will likely be faster only for large datasets or
 complex models.)
 * `save_models` (default `FALSE`): Whether to return the fit models and
 save them to an RData file.
+* `verbosity` (default `'FINEST'`): The level of verbosity for the 
+`logging` package.
+* `save_plots_rds` (default `FALSE`): Whether to save the plots as RDS files.
+* `assay.type` (default `1`): A string or index to select the assay when using
+a `SummarizedExperiment` object.
 
 ## Troubleshooting ##
 

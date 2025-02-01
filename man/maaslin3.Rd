@@ -19,7 +19,7 @@ This wrapper for all MaAsLin 3 steps finds abundance and prevalence
 }
 \usage{
 maaslin3(input_data,
-    input_metadata,
+    input_metadata = NULL,
     output,
     formula = NULL,
     fixed_effects = NULL,
@@ -32,7 +32,7 @@ maaslin3(input_data,
     feature_specific_covariate_name = NULL,
     feature_specific_covariate_record = NULL,
     min_abundance = 0,
-    min_prevalence = 0.0,
+    min_prevalence = 0,
     zero_threshold = 0,
     min_variance = 0,
     max_significance = 0.1,
@@ -43,8 +43,8 @@ maaslin3(input_data,
     unscaled_abundance = NULL,
     median_comparison_abundance = TRUE,
     median_comparison_prevalence = FALSE,
-    median_comparison_abundance_threshold = 0.25,
-    median_comparison_prevalence_threshold = 0.25,
+    median_comparison_abundance_threshold = 0,
+    median_comparison_prevalence_threshold = 0,
     subtract_median = FALSE,
     warn_prevalence = TRUE,
     augment = TRUE,
@@ -56,14 +56,20 @@ maaslin3(input_data,
     plot_associations = TRUE,
     max_pngs = 30,
     cores = 1,
-    save_models = FALSE)
+    save_models = FALSE,
+    save_plots_rds = FALSE,
+    verbosity = 'FINEST',
+    summary_plot_balanced = FALSE,
+    assay.type = 1)
 }
 \arguments{
-    \item{input_data}{A data frame of feature abundances or read counts or a
-    filepath to a tab-delimited file with abundances. It should be formatted
+    \item{input_data}{A data frame of feature abundances or read counts, a
+    filepath to a tab-delimited file with abundances, or a SummarizedExperiment
+    or TreeSummarizedExperiment object with the taxa table in `assays` and 
+    metadata in `colData`. 
+    If a data frame or a filepath is supplied, the table should be formatted 
     with features as columns and samples as rows (or the transpose). The
-    column
-    and row names should be the feature names and sample names
+    column and row names should be the feature names and sample names
     respectively.}
     \item{input_metadata}{A data frame of per-sample metadata or a filepath
     to
@@ -115,13 +121,14 @@ maaslin3(input_data,
     names
     and sample names respectively.}
     \item{feature_specific_covariate_name}{The name for the feature-specific
-    covariates when fitting the models.}
+    covariates when fitting the models. This string must be parse-able
+    in a formula (e.g., no spaces).}
     \item{feature_specific_covariate_record}{Whether to keep the
     feature-specific covariates in the outputs when calculating p-values,
     writing results, and displaying plots.}
     \item{min_abundance}{Features with abundances more than
-    \code{min_abundance} in \code{min_prevalence} of the samples will be
-    included for analysis. The threshold is applied after normalization and
+    \code{min_abundance} in more than \code{min_prevalence} of the samples will 
+    be included for analysis. The threshold is applied after normalization and
     before transformation.}
     \item{min_prevalence}{See \code{min_abundance}.}
     \item{zero_threshold}{Abundances less than or equal to
@@ -208,6 +215,16 @@ maaslin3(input_data,
     cores will likely be faster only for large datasets or complex models.}
     \item{save_models}{Whether to return the fit models and save them to an
     RData file.}
+    \item{save_plots_rds}{Whether to return the fit models and save them to an
+    RData file.}
+    \item{verbosity}{The level of verbosity for the \code{logging} package.}
+    \item{summary_plot_balanced}{If set to TRUE the summary plot will 
+    show the top N features of each variable included in 
+    \code{coef_plot_vars} where N is equal to: 
+    \code{ceiling(summary_plot_first_n/length(coef_plot_vars))}. Will error
+    if \code{coef_plot_vars} = \code{NULL}}
+    \item{assay.type}{A string or index to select the assay when using
+    a \code{SummarizedExperiment} object}
 }
 \value{
     A list containing the following items:

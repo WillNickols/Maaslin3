@@ -22,7 +22,7 @@ maaslin_log_arguments(input_data,
                     feature_specific_covariate_name = NULL,
                     feature_specific_covariate_record = NULL,
                     min_abundance = 0,
-                    min_prevalence = 0.0,
+                    min_prevalence = 0,
                     zero_threshold = 0,
                     min_variance = 0,
                     max_significance = 0.1,
@@ -33,8 +33,8 @@ maaslin_log_arguments(input_data,
                     unscaled_abundance = NULL,
                     median_comparison_abundance = TRUE,
                     median_comparison_prevalence = FALSE,
-                    median_comparison_abundance_threshold = 0.25,
-                    median_comparison_prevalence_threshold = 0.25,
+                    median_comparison_abundance_threshold = 0,
+                    median_comparison_prevalence_threshold = 0,
                     subtract_median = FALSE,
                     warn_prevalence = TRUE,
                     augment = TRUE,
@@ -46,7 +46,10 @@ maaslin_log_arguments(input_data,
                     plot_associations = TRUE,
                     max_pngs = 30,
                     cores = 1,
-                    save_models = FALSE)
+                    save_models = FALSE,
+                    save_plots_rds = FALSE,
+                    verbosity = 'FINEST',
+                    summary_plot_balanced = FALSE)
 }
 \arguments{
     \item{input_data}{A data frame of feature abundances or read counts or a
@@ -99,8 +102,8 @@ maaslin_log_arguments(input_data,
     feature-specific covariates in the outputs when calculating p-values,
     writing results, and displaying plots.}
     \item{min_abundance}{Features with abundances more than
-    \code{min_abundance} in \code{min_prevalence} of the samples will be
-    included for analysis. The threshold is applied after normalization and
+    \code{min_abundance} in more than \code{min_prevalence} of the samples will 
+    be included for analysis. The threshold is applied after normalization and
     before transformation.}
     \item{min_prevalence}{See \code{min_abundance}.}
     \item{zero_threshold}{Abundances less than or equal to
@@ -183,6 +186,13 @@ maaslin_log_arguments(input_data,
     cores will likely be faster only for large datasets or complex models.}
     \item{save_models}{Whether to return the fit models and save them to an
     RData file.}
+    \item{save_plots_rds}{Whether to return the plots to an RDS file.}
+    \item{verbosity}{The level of verbosity for the \code{logging} package.}
+    \item{summary_plot_balanced}{If set to TRUE the summary plot will 
+    show the top N features of each variable included in 
+    \code{coef_plot_vars} where N is equal to: 
+    \code{ceiling(summary_plot_first_n/length(coef_plot_vars))}. Will error
+    if \code{coef_plot_vars} = \code{NULL}}
 }
 \value{
     No value is returned, but a logger is opened with the parameters logged.

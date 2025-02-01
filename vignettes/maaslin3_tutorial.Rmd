@@ -29,14 +29,17 @@ cross-sectional and longitudinal studies.
 
 If you use the MaAsLin 3 software, please cite our manuscript:
 
-> William A. Nickols, Jacob T. Nearing, Kelsey N. Thompson, Jiaxian
-Shen, Curtis Huttenhower
-MaAsLin 3: Refining and extending generalized multivariate linear models
-for meta-omic association discovery. (In progress).
+> William A. Nickols, Thomas Kuntz, Jiaxian Shen, Sagun Maharjan, 
+Himel Mallick, Eric A. Franzosa, Kelsey N. Thompson, Jacob T. Nearing, 
+Curtis Huttenhower. MaAsLin 3: Refining and extending generalized 
+multivariable linear models for meta-omic association discovery. 
+bioRxiv 2024.12.13.628459; doi: https://doi.org/10.1101/2024.12.13.628459
 
 ### Support ###
 The user manual can be found
-[here](https://github.com/biobakery/maaslin3). If you have questions,
+[here](https://github.com/biobakery/maaslin3). If using vignettes,
+users should start with the `maaslin3_tutorial.Rmd` vignette and then
+refer to the `maaslin3_manual.Rmd` vignette as necessary. If you have questions,
 please direct them to the [MaAsLin
 Forum](https://forum.biobakery.org/c/Downstream-analysis-and-statistics/maaslin)
 
@@ -116,23 +119,16 @@ software and use `sessionInfo()` to make sure that you indeed have R >=
 
 ## 2. Installing MaAsLin 3 {#installing-maaslin-3}
 
-The latest development version of MaAsLin 3 can be installed from GitHub
-using the `devtools` package.
+The latest version of MaAsLin 3 can be installed from BiocManager.
 
 ```{r, eval=FALSE, cache = FALSE}
-if (!require('kableExtra', character.only = TRUE)) {
-    install.packages('kableExtra')
-}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 
-# Install devtools if not present
-if (!require('devtools', character.only = TRUE)) {
-    install.packages('devtools')
-}
-
-# Install MaAsLin 3
-library("devtools")
-install_github("biobakery/maaslin3")
+BiocManager::install("biobakery/maaslin3")
 ```
+
+To compile vignettes yourself, specify `dependencies = TRUE`.
 
 ```{r, eval=TRUE, cache = FALSE, echo=FALSE}
 for (lib in c('maaslin3', 'dplyr', 'ggplot2', 'knitr', 'kableExtra')) {
@@ -171,6 +167,11 @@ The data file can contain samples not included in the metadata file
 (along with the reverse case). For both cases, those samples not
 included in both files will be removed from the analysis. Also, the
 samples do not need to be in the same order in the two files.
+
+Samples with NA values for the metadata will be excluded when fitting the 
+models. It is recommended to drop these samples in advance under a 
+missing-at-random assumption or use multiple imputation to run 
+the complete dataset.
 
 Example input files can be found in the ``inst/extdata`` folder of the
 MaAsLin 3 source. The files provided were generated from the Human
@@ -299,6 +300,7 @@ proportions of zeros. However, filtering low prevalence features might improve
 power.
 
 ```{R, echo = TRUE, results = 'hide', warning = FALSE, cache = FALSE}
+set.seed(1)
 fit_out <- maaslin3(input_data = taxa_table,
                     input_metadata = metadata,
                     output = 'hmp2_output',
@@ -311,7 +313,35 @@ fit_out <- maaslin3(input_data = taxa_table,
                     max_significance = 0.1,
                     median_comparison_abundance = TRUE,
                     median_comparison_prevalence = FALSE,
-                    max_pngs = 100,
+                    max_pngs = 10,
+                    cores = 1)
+```
+
+By default, many lines of information are printed while the models fit, 
+but the verbosity can be changed with the `verbosity` argument (e.g., 
+`verbosity = 'WARN'`).
+
+MaAsLin 3 can also take as input a `SummarizedExperiment` or 
+`TreeSummarizedExperiment` object from BioConductor:
+
+```{R, echo = TRUE, results = 'hide', warning = FALSE, eval = FALSE}
+se <- SummarizedExperiment(
+    assays = list(taxa_table = t(taxa_table)),
+    colData = metadata
+)
+
+fit_out <- maaslin3(input_data = se,
+                    output = 'hmp2_output',
+                    formula = '~ diagnosis + dysbiosis_state +
+                        antibiotics + age + reads',
+                    normalization = 'TSS',
+                    transform = 'LOG',
+                    augment = TRUE,
+                    standardize = TRUE,
+                    max_significance = 0.1,
+                    median_comparison_abundance = TRUE,
+                    median_comparison_prevalence = FALSE,
+                    max_pngs = 10,
                     cores = 1)
 ```
 
@@ -345,9 +375,10 @@ supplying spike-in or total abundances with `unscaled_abundance`.
 #### Significant associations
 
 The main output from MaAsLin 3 is the list of significant associations
-in `significant_results.tsv`. This lists all associations that pass
-MaAsLin 3's significance
-threshold, ordered by increasing joint q-value. The format is:
+in `significant_results.tsv`. This lists all associations with joint 
+or individual q-values 
+that pass MaAsLin 3's significance
+threshold, ordered by increasing individual q-value. The format is:
 
 * `feature` and `metadata` are the feature and metadata names.
 * `value` and `name` are the value of the metadata and variable name
@@ -360,11 +391,8 @@ change in the metadatum variable corresponds to a $\textrm{coef}$ change
 in the log-odds of a feature being present.
 * `pval_individual` and `qval_individual` are the p-value and false
 discovery rate (FDR) corrected q-value of the individual association.
-FDR correction is performed over all non-NA p-values in the abundance
-and prevalence modeling separately.
-* `model` specifies whether the association is abundance or prevalence.
-* `N` and `N.not.zero` are the total number of data points and the total
-number of non-zero data points for the feature.
+FDR correction is performed over all p-values without errors in the abundance
+and prevalence modeling together.
 * `pval_joint` and `qval_joint` are the p-value and q-value of the joint
 prevalence and abundance association. The p-value comes from plugging in
 the minimum of the association's abundance and prevalence p-values into
@@ -372,11 +400,15 @@ the Beta(1,2) CDF. It is interpreted as the probability that either the
 abundance or prevalence association would be as extreme as observed if
 there was neither an abundance nor prevalence association between the
 feature and metadatum.
+* `model` specifies whether the association is abundance or prevalence.
+* `N` and `N_not_zero` are the total number of data points and the total
+number of non-zero data points for the feature.
+
 
 ```{r, echo = FALSE, cache = FALSE}
 signif_results <- read.csv('hmp2_output/significant_results.tsv',
 sep='\t')
-signif_results %>%
+head(signif_results, 20) %>%
     dplyr::mutate_if(is.numeric, .funs = function(x){(
         as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
@@ -424,7 +456,7 @@ visualizations. In addition, the object returned from `maaslin3`
         stars indicate the individual q-value is below `max_significance`
         divided by 10. (Make sure to set `include=T` to view the plots when
         knitting the Rmd.)
-```{r, out.width='100%', echo=FALSE, cache = FALSE, include=FALSE}
+```{r, out.width='100%', echo=FALSE, cache = FALSE, include=FALSE, eval=FALSE}
 # Rename summary plot to avoid knitting issues later
 quiet_out <- file.rename('hmp2_output/figures/summary_plot.png',
                         'hmp2_output/figures/summary_plot_first.png')
@@ -441,10 +473,12 @@ knitr::include_graphics("hmp2_output/figures/summary_plot_first.png")
         * Data points plotted are after filtering, normalization, and
         transformation so that the scale in the plot is the scale that was used
         in fitting.
-```{r, echo=FALSE, fig.show='hold',include=FALSE}
+        * **To see the association plots, set `max_pngs = 250` above and set 
+        `eval=TRUE` and `include=TRUE` in this chunk**
+```{r, echo=FALSE, fig.show='hold',include=FALSE, eval=FALSE}
 prefix <- "hmp2_output/figures/association_plots"
 plot_vec <- 
-    c("/age/linear/age_Faecalibacterium_prausnitzii_linear.png",
+    c("/age/linear/age_Enterocloster_clostridioformis_linear.png",
     "/dysbiosis_state/linear/dysbiosis_state_Escherichia_coli_linear.png",
     "/age/logistic/age_Bifidobacterium_longum_logistic.png",
     paste0("/dysbiosis_state/logistic/",
@@ -488,8 +522,8 @@ the `association_plots` directory.
     least 10 samples in which it was absent for each significant category**.
     * Significant abundance associations with continuous metadata should be
     checked visually for influential outliers.
-3. The q-values are FDR corrected over all abundance or prevalence
-relationships (separately), so it may be preferable to FDR correct just
+3. The q-values are FDR corrected over all abundance and prevalence
+relationships, so it may be preferable to FDR correct just
 the p-values from the variables of interest. This can reduce false
 positives when there are many significant but uninteresting associations
 (e.g., many read depth associations).
@@ -594,7 +628,7 @@ scatter_plots <- maaslin_plot_results_from_output(
     median_comparison_abundance = TRUE,
     median_comparison_prevalence = FALSE,
     max_significance = 0.1,
-    max_pngs = 100)
+    max_pngs = 20)
 ```
 
 In the new summary plot below, we can see that the feature names are
@@ -607,11 +641,11 @@ knitr::include_graphics("hmp2_output/figures/summary_plot.png")
 
 In the association plots, the taxa and metadata have been renamed to be
 consistent with the results file from earlier.
-```{r, echo=FALSE, fig.show='hold', cache = FALSE, include=FALSE}
+```{r, echo=FALSE, fig.show='hold', cache = FALSE, include=FALSE, eval=FALSE}
 prefix <- "hmp2_output/figures/association_plots"
-plot_vec <- c("/age/linear/Age_Faecalibacterium prausnitzii_linear.png",
+plot_vec <- c("/Age/linear/Age_Enterocloster clostridioformis_linear.png",
             "/Dysbiosis/linear/Dysbiosis_Escherichia coli_linear.png",
-            "/age/logistic/Age_Bifidobacterium longum_logistic.png",
+            "/Age/logistic/Age_Bifidobacterium longum_logistic.png",
             paste0("/Dysbiosis/logistic/",
                 "Dysbiosis_Faecalibacterium prausnitzii_logistic.png"
                 ))
@@ -704,7 +738,7 @@ The absolute abundance coefficients can be inspected:
 
 ```{R, cache = FALSE}
 rownames(fit_out$fit_data_abundance$results) <- NULL
-fit_out$fit_data_abundance$results %>%
+head(fit_out$fit_data_abundance$results, 20) %>%
     dplyr::mutate_if(is.numeric, .funs =
                             function(x){(as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
@@ -767,13 +801,20 @@ The absolute abundance coefficients can be inspected:
 
 ```{R, cache = FALSE}
 rownames(fit_out$fit_data_abundance$results) <- NULL
-fit_out$fit_data_abundance$results %>%
+head(fit_out$fit_data_abundance$results, n = 20) %>%
     dplyr::mutate_if(is.numeric,
                     .funs = function(x){(as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
     kableExtra::kable_styling("striped", position = 'center') %>%
     kableExtra::scroll_box(width = "800px", height = "400px")
 ```
+
+#### Computationally estimated absolute abundance
+
+When using a purely computational approach to estimate absolute abundance
+(e.g., Nishijima et al. Cell 2024 with the function `MLP`), the abundance 
+table can be estimated
+and then run with the `normalization = 'NONE'` to avoid scaling the results.
 
 ### 4.2 Random effects (clustered samples) {#random-effects}
 
@@ -793,14 +834,14 @@ where the same subject (column `participant_id`) can have multiple
 samples. We thus use `participant_id` as a random effect grouping
 variable in the model.
 
-```{R, echo = TRUE, results = 'hide', warning = FALSE}
+```{R, echo = TRUE, results = 'hide', warning = FALSE, messages = FALSE}
 # Subset to only CD cases for time; taxa are subset automatically
 fit_out <- maaslin3(
     input_data = taxa_table,
     input_metadata = metadata[metadata$diagnosis == 'CD',],
     output = 'random_effects_output',
     formula = '~ dysbiosis_state + antibiotics +
-        age + reads + strata(participant_id)',
+        age + reads + (1|participant_id)',
     plot_summary_plot = FALSE,
     plot_associations = FALSE)
 ```
@@ -809,7 +850,7 @@ fit_out <- maaslin3(
 signif_results <-
 read.csv('random_effects_output/significant_results.tsv',
                             sep='\t')
-signif_results %>%
+head(signif_results, n = 20) %>%
     dplyr::mutate_if(is.numeric, .funs =
                         function(x){(as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
@@ -831,7 +872,8 @@ of features in a few hours (and increasing the CPUs used with `cores`
 can help). However, random effects are not the solution to every
 correlated data problem. In particular, **logistic random intercept models may
 produce poor model fits when there are fewer than 5 observations per
-group.** In these scenarios, per-group fixed effects or conditional 
+group.** In these scenarios, per-group fixed effects or, for advanced users,
+conditional 
 logistic regression (see `strata_effects` in the manual) should be used. For
 example, in a before-and-after treatment study with one sample before
 and one sample after, the participant IDs and a pre/post indicator
@@ -874,7 +916,7 @@ full_results <- full_results %>%
     dplyr::arrange(qval_joint) %>%
     dplyr::filter(metadata == "diagnosis")
 rownames(full_results) <- NULL
-full_results %>%
+head(full_results, n = 20) %>%
     dplyr::mutate_if(is.numeric,
                     .funs = function(x){(as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
@@ -982,7 +1024,7 @@ full_results <- full_results %>%
                                             'Yesterday, 3 or more times'))) %>%
     dplyr::arrange(value)
 rownames(full_results) <- NULL
-full_results %>%
+head(full_results, n = 20) %>%
     dplyr::mutate_if(is.numeric,
                     .funs = function(x){(as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
@@ -1046,7 +1088,7 @@ full_results <- full_results %>%
                                             'Yesterday, 3 or more times'))) %>%
     dplyr::arrange(value)
 rownames(full_results) <- NULL
-full_results %>%
+head(full_results, n = 20) %>%
     dplyr::mutate_if(is.numeric,
                     .funs = function(x){(as.character(signif(x, 3)))}) %>%
     knitr::kable() %>%
@@ -1061,14 +1103,14 @@ combination of the coefficients is significantly different from some constant
 on the right hand size (RHS). Specify a contrast matrix
 with column names matching the coefficient names and rows with the contrasts
 of interest. For each row $C^T$, the hypothesis $H_0:C^T\vec{\beta}=RHS$ 
-will be tested. Note that
-`save_models` must be `TRUE` in the original fit to perform contrast tests.
+will be tested. If no RHS is specified, a median test will be performed,
+and the median test RHS will be returned.
 
 Below, we test whether the UC and CD diagnosis coefficients are the same
-and whether the UC and CD dysbiosis coefficients are the same.
+and whether the UC and CD dysbiosis coefficients are the same. The contrast
+matrix can easily be extended to test any groups pairwise.
 
-```{R, echo = TRUE, results = 'hide', warning = FALSE, cache = TRUE}
-# Fit with save_models = TRUE
+```{R, echo = TRUE, results = 'hide', warning = FALSE, cache = FALSE}
 fit_out <- maaslin3(input_data = taxa_table,
                     input_metadata = metadata,
                     output = 'contrast_test_output',
@@ -1076,11 +1118,10 @@ fit_out <- maaslin3(input_data = taxa_table,
                         antibiotics + age + reads',
                     plot_summary_plot = FALSE,
                     plot_associations = FALSE,
-                    cores = 1,
-                    save_models = TRUE)
+                    cores = 1)
 ```
 
-```{R, echo = TRUE, warning = FALSE, cache = TRUE}
+```{R, echo = TRUE, warning = FALSE, cache = FALSE}
 contrast_mat <- matrix(c(1, -1, 0, 0, 0, 0, 1, -1), 
     ncol = 4, nrow = 2, byrow = TRUE)
     
@@ -1092,12 +1133,12 @@ colnames(contrast_mat) <- c("diagnosisUC",
 rownames(contrast_mat) <- c("diagnosis_test", "dysbiosis_test")
 
 contrast_mat
-                            
+
 contrast_out <- maaslin_contrast_test(fits = fit_out$fit_data_abundance$fits,
                         contrast_mat = contrast_mat,
-                        rhs = c(0, 0))
+                        median_comparison = TRUE)
 
-contrast_out %>%
+head(contrast_out, n = 20) %>%
     knitr::kable() %>%
     kableExtra::kable_styling("striped", position = 'center') %>%
     kableExtra::scroll_box(width = "800px", height = "400px")
@@ -1126,6 +1167,26 @@ slashes may need to be removed):
     features) file
     * ``inst/extdata/HMP2_metadata.tsv`` is the path to your metadata file
     * ``command_line_output`` is the path to the folder to write the output
+
+## Tool comparison ##
+
+| Tool | Models differential abundance | \
+Models differential prevalence | Models allowed | Accounts for\
+compositionality | Can use experimental absolute abundance information |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| MaAsLin 3 | Yes | Yes, for any model type | Any lme4 model\
+(general mixed models), level-vs-level differences, group-wise differences, \
+feature-specific covariates, contrast tests | Yes | Yes |
+| MaAsLin 2 | Yes | Only insofar as it affects abundance | Fixed and random \
+effects (subset of general mixed models) | No | No |
+| ANCOM-BC2 | Yes | Only when completely absent in a group | Any lme4 model \
+(general mixed models), level-vs-level differences, group-wise differences, \
+contrast tests | Yes | No |
+| ALDEx2 | Yes | Only insofar as it affects abundance | Fixed \
+effects | Yes | No |
+| LinDA | Yes | Only insofar as it affects abundance | Any lme4 model \
+(general mixed models), group-wise differences, contrast tests | Yes | No |
+
 
 ```{R}
 sessionInfo()

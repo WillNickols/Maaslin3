@@ -102,7 +102,8 @@ make_coef_plot <- function(merged_results_sig,
                         max_significance,
                         median_comparison_prevalence,
                         median_comparison_abundance,
-                        median_df) {
+                        median_df,
+                        plot_threshold = 10) {
     coef_plot_data <-
         merged_results_sig[merged_results_sig$full_metadata_name %in% 
                             coef_plot_vars,]
@@ -111,9 +112,9 @@ make_coef_plot <- function(merged_results_sig,
     quantile_df <- coef_plot_data %>%
         dplyr::group_by(.data$full_metadata_name) %>%
         dplyr::summarise(
-            lower_q = median(.data$coef) - 10 * 
+            lower_q = median(.data$coef) - plot_threshold * 
                 (median(.data$coef) - quantile(.data$coef, 0.25)),
-            upper_q = median(.data$coef) + 10 * 
+            upper_q = median(.data$coef) + plot_threshold * 
                 (quantile(.data$coef, 0.75) - median(.data$coef))
         ) %>%
         data.frame()
@@ -373,6 +374,9 @@ make_heatmap_plot <- function(merged_results_sig,
         full_metadata_name = unique(heatmap_data$full_metadata_name),
         model = unique(heatmap_data$model)
     )
+    if (length(unique(grid$model)) == 2) {
+        grid$model <- factor(grid$model, levels = c('Prevalence', 'Abundance'))
+    }
     heatmap_data <-
         merge(
             grid,
@@ -419,7 +423,8 @@ make_heatmap_plot <- function(merged_results_sig,
                 max_significance, 3
             )), paste0(
                 "** < ", round(max_significance / 10, 5)
-            ), "")
+            ), ""),
+            drop = FALSE
         ) +
         ggplot2::labs(x = '',
                     y = "Feature",
@@ -466,7 +471,10 @@ maaslin3_summary_plot <-
             coef_plot_vars = NULL,
             heatmap_vars = NULL,
             median_comparison_abundance = FALSE,
-            median_comparison_prevalence = FALSE) {
+            median_comparison_prevalence = FALSE,
+            balanced = FALSE,
+            save_plots_rds = FALSE) {
+        ret_plots <- list()
         if (first_n > 200) {
             logging::logerror(
                 paste(
@@ -478,6 +486,10 @@ maaslin3_summary_plot <-
         }
         
         merged_results <- preprocess_merged_results(merged_results)
+        
+        if (is.null(merged_results) || nrow(merged_results) == 0) {
+            return()
+        }
         
         median_df <- merged_results %>%
             dplyr::group_by(.data$full_metadata_name, .data$model) %>%
@@ -525,15 +537,48 @@ maaslin3_summary_plot <-
         
         # Subset associations for plotting
         merged_results_joint_only <-
-            unique(merged_results[, c('feature', 'qval_joint')])
+            unique(merged_results[, c('feature', 'qval_joint', 
+                                        'full_metadata_name')])
         merged_results_joint_only <-
             merged_results_joint_only[
                 order(merged_results_joint_only$qval_joint),]
         if (length(unique(merged_results_joint_only$feature)) < first_n) {
             first_n <- length(unique(merged_results_joint_only$feature))
+            signif_taxa <-
+                unique(merged_results_joint_only$feature)[seq(first_n)]
+        } else {
+            # If balanced is turned on but there are not
+            # coefs choosen, error out
+            if (balanced){
+                if (is.null(coef_plot_vars)){
+                    logging::logerror(
+                        paste(
+                            "Balanced plotting requires 
+                            you set the variables you 
+                            want to plot using
+                            the parameter coef_plot_vars"
+                        )
+                    )
+                    return()
+                } else {
+                    # grab the first N feature where 
+                    # N=N/(length of coef_plot_var) to
+                    # plot the coef plot
+                    first_n_per <- first_n/length(coef_plot_vars)
+                    signif_taxa <- merged_results_joint_only %>% 
+                    dplyr::group_by(.data$full_metadata_name) %>%
+                    dplyr::arrange(dplyr::desc(-.data$qval_joint), 
+                                    .by_group = TRUE) %>%
+                    dplyr::slice_head(n=ceiling(first_n_per)) %>%
+                    dplyr::pull(.data$feature) %>%
+                    unique()
+                }
+            } else {
+                signif_taxa <-
+                unique(merged_results_joint_only$feature)[seq(first_n)]
+            }
         }
-        signif_taxa <-
-            unique(merged_results_joint_only$feature)[seq(first_n)]
+
         
         merged_results_sig <- merged_results %>%
             dplyr::filter(.data$feature %in% signif_taxa)
@@ -580,12 +625,18 @@ maaslin3_summary_plot <-
         if (length(coef_plot_vars) > 0 &
             sum(merged_results_sig$full_metadata_name %in% 
                 coef_plot_vars) >= 1) {
+            if (balanced) {
+                plot_thres <- 5
+            } else {
+                plot_thres <- 10
+            }
             p1 <- make_coef_plot(merged_results_sig, 
                                 coef_plot_vars,
                                 max_significance,
                                 median_comparison_prevalence,
                                 median_comparison_abundance,
-                                median_df)
+                                median_df,
+                                plot_threshold = plot_thres)
             
         } else {
             p1 <- NULL
@@ -637,6 +688,9 @@ maaslin3_summary_plot <-
         } else {
             final_plot <- NULL
         }
+        ret_plots[["coefficient"]] <- p1
+        ret_plots[["heat"]] <- p2
+        ret_plots[["final"]] <- final_plot
         
         # Save plot
         if (!is.null(final_plot)) {
@@ -652,19 +706,42 @@ maaslin3_summary_plot <-
                 ))) / 20) * 2.5 +
                 length(heatmap_vars) * 0.25
             
-            ggplot2::ggsave(
-                summary_plot_file,
-                plot = final_plot,
-                height = height_out,
-                width = width_out
-            )
+            # Silence ggplot warnings
+            tryCatch({
+                withCallingHandlers({
+                    ggplot2::ggsave(
+                        summary_plot_file,
+                        plot = final_plot,
+                        height = height_out,
+                        width = width_out
+                    )
+                },
+                warning = function(w) {
+                    invokeRestart("muffleWarning")
+                })
+            })
+            
             png_file <-
                 file.path(figures_folder, "summary_plot.png")
-            ggplot2::ggsave(png_file,
-                            plot = final_plot,
-                            height = height_out,
-                            width = width_out)
+            
+            tryCatch({
+                withCallingHandlers({
+                    ggplot2::ggsave(png_file,
+                                    plot = final_plot,
+                                    height = height_out,
+                                    width = width_out)
+                },
+                warning = function(w) {
+                    invokeRestart("muffleWarning")
+                })
+            })
+            if (save_plots_rds) {
+                saveRDS(final_plot,
+                        file = paste(figures_folder,
+                            "/" , "summary_plot_gg.RDS", sep = ""))
+            }
         }
+        return(ret_plots)
     }
 
 # Create a scatterplot for abundance vs. continuous associations
@@ -678,6 +755,9 @@ make_scatterplot <- function(joined_features_metadata_abun,
                             N_nonzero,
                             N_total,
                             results_value) {
+    match.arg(normalization, c('Total sum scaling', 'Center log ratio', 'None'))
+    match.arg(transformation, c('Log base 2', 'Pseudo-log base 2', 'None'))
+
     temp_plot <-
         ggplot2::ggplot(data = joined_features_metadata_abun,
                         ggplot2::aes(
@@ -779,6 +859,9 @@ make_boxplot_lm <- function(joined_features_metadata_abun,
                             N_nonzero,
                             N_total,
                             results_value) {
+    match.arg(normalization, c('Total sum scaling', 'Center log ratio', 'None'))
+    match.arg(transformation, c('Log base 2', 'Pseudo-log base 2', 'None'))
+    
     temp_plot <-
         ggplot2::ggplot(data = joined_features_metadata_abun,
                         ggplot2::aes(.data$metadata, 
@@ -873,6 +956,8 @@ make_lm_plot <- function(this_signif_association,
                         transformation,
                         feature_specific_covariate_name,
                         feature_specific_covariate) {
+    match.arg(normalization, c('Total sum scaling', 'Center log ratio', 'None'))
+    match.arg(transformation, c('Log base 2', 'Pseudo-log base 2', 'None'))
 
     coef_val <-
         this_signif_association[
@@ -882,7 +967,7 @@ make_lm_plot <- function(this_signif_association,
             this_signif_association$model == 'linear',]$qval_individual
     N_nonzero <-
         this_signif_association[
-            this_signif_association$model == 'linear',]$N.not.zero
+            this_signif_association$model == 'linear',]$N_not_zero
     N_total <-
         this_signif_association[
             this_signif_association$model == 'linear',]$N
@@ -992,6 +1077,9 @@ make_boxplot_logistic <- function(joined_features_metadata_prev,
                                 N_nonzero,
                                 N_total,
                                 results_value) {
+    match.arg(normalization, c('Total sum scaling', 'Center log ratio', 'None'))
+    match.arg(transformation, c('Log base 2', 'Pseudo-log base 2', 'None'))
+    
     temp_plot <-
         ggplot2::ggplot(data = joined_features_metadata_prev,
                         ggplot2::aes(.data$feature_abun, 
@@ -1073,6 +1161,9 @@ make_tile_plot <- function(joined_features_metadata_prev,
                         N_nonzero,
                         N_total,
                         results_value) {
+    match.arg(normalization, c('Total sum scaling', 'Center log ratio', 'None'))
+    match.arg(transformation, c('Log base 2', 'Pseudo-log base 2', 'None'))
+    
     count_df <- joined_features_metadata_prev %>%
         dplyr::group_by(.data$feature_abun, .data$metadata) %>%
         dplyr::summarise(count = dplyr::n(), .groups = 'drop')
@@ -1175,6 +1266,9 @@ make_logistic_plot <- function(this_signif_association,
                             transformation,
                             feature_specific_covariate_name,
                             feature_specific_covariate) {
+    match.arg(normalization, c('Total sum scaling', 'Center log ratio', 'None'))
+    match.arg(transformation, c('Log base 2', 'Pseudo-log base 2', 'None'))
+    
     coef_val <-
         this_signif_association[
             this_signif_association$model == 'logistic',]$coef
@@ -1184,7 +1278,7 @@ make_logistic_plot <- function(this_signif_association,
         ]$qval_individual
     N_nonzero <-
         this_signif_association[
-            this_signif_association$model == 'logistic',]$N.not.zero
+            this_signif_association$model == 'logistic',]$N_not_zero
     N_total <-
         this_signif_association[
             this_signif_association$model == 'logistic',]$N
@@ -1316,7 +1410,12 @@ maaslin3_association_plots <-
             transform,
             feature_specific_covariate = NULL,
             feature_specific_covariate_name = NULL,
-            feature_specific_covariate_record = NULL) {
+            feature_specific_covariate_record = NULL,
+            save_plots_rds = FALSE) {
+        
+        
+        match.arg(normalization, c("TSS", "CLR", "NONE"))
+        match.arg(transform, c("LOG", "PLOG", "NONE"))
         
         # Disregard abundance-induced-prevalence errors in plotting
         merged_results$error[grepl("Prevalence association possibly induced", 
@@ -1355,7 +1454,6 @@ maaslin3_association_plots <-
         )
         
         saved_plots <- list()
-        
         features_by_metadata <-
             unique(merged_results[, c('feature', 'metadata', 'model')])
         
@@ -1387,7 +1485,6 @@ maaslin3_association_plots <-
                 dplyr::inner_join(feature_abun, metadata_sub, by = c('sample'))
             
             model_name <- features_by_metadata[row_num, 'model']
-            
             this_signif_association <-
                 merged_results[merged_results$feature == feature_name &
                                 merged_results$metadata == metadata_name &
@@ -1419,6 +1516,7 @@ maaslin3_association_plots <-
             
             saved_plots[[metadata_name]][[feature_name]][[model_name]] <-
                 temp_plot
+            
         }
         
         association_plots_folder <-
@@ -1428,49 +1526,56 @@ maaslin3_association_plots <-
         }
         
         # Save all plots
-        for (metadata_variable in names(saved_plots)) {
-            for (feature in names(saved_plots[[metadata_variable]])) {
-                for (model_name in names(
-                    saved_plots[[metadata_variable]][[feature]])) {
-                    this_plot <-
-                        saved_plots[[metadata_variable]][[
-                            feature]][[model_name]]
+        vapply(names(saved_plots), function(metadata_variable) {
+            # Save RDS file for each metadata_variable
+            if (save_plots_rds) {
+                saveRDS(saved_plots[[metadata_variable]], 
+                        file = file.path(association_plots_folder, 
+                                        paste0(metadata_variable, 
+                                        "_gg_associations.RDS")))
+            }
+            
+            # Iterate over each feature in the metadata_variable
+            vapply(names(saved_plots[[metadata_variable]]), function(feature) {
+                # Iterate over each model_name for the feature
+                vapply(names(saved_plots[[metadata_variable]][[feature]]), 
+                    function(model_name) {
+                    this_plot <- saved_plots[[metadata_variable]][[
+                        feature]][[model_name]]
                     
-                    association_plots_sub_folder <-
-                        file.path(association_plots_folder,
-                                metadata_variable,
-                                model_name)
+                    # Create the subfolder for the plot
+                    association_plots_sub_folder <- file.path(
+                        association_plots_folder, metadata_variable, model_name)
                     if (!file.exists(association_plots_sub_folder)) {
-                        dir.create(association_plots_sub_folder,
-                                recursive = TRUE)
+                        dir.create(association_plots_sub_folder, 
+                                    recursive = TRUE)
                     }
                     
-                    png_file <-
-                        file.path(
-                            association_plots_sub_folder,
-                            paste0(
-                                metadata_variable,
-                                '_',
-                                feature,
-                                "_",
-                                model_name,
-                                ".png"
-                            )
-                        )
-                    height <-
-                        max(960, 15 * max(nchar(unlist(
-                            strsplit(this_plot$labels$y, '\n')
-                        ))))
-                    ggplot2::ggsave(
-                        filename = png_file,
-                        plot = this_plot,
-                        dpi = 600,
-                        width = 960 / 300,
-                        height = height / 300
-                    )
-                }
-            }
-        }
-        
+                    # Define the file path for saving the plot
+                    png_file <- file.path(association_plots_sub_folder, 
+                                            paste0(metadata_variable, '_', 
+                                            feature, "_", model_name, ".png"))
+                    
+                    # Calculate height based on plot labels
+                    height <- max(960, 18 * max(nchar(unlist(strsplit(
+                        this_plot$labels$y, '\n')))))
+                    
+                    # Try saving the plot
+                    tryCatch({
+                        withCallingHandlers({
+                            ggplot2::ggsave(filename = png_file, 
+                                            plot = this_plot, 
+                                            dpi = 600, 
+                                            width = 960 / 300, 
+                                            height = height / 300)
+                        }, warning = function(w) { 
+                            invokeRestart("muffleWarning") })
+                    })
+                    return(0)
+                }, numeric(1))
+                return(0)
+            }, numeric(1))
+            return(0)
+        }, numeric(1))
         return(saved_plots)
     }

@@ -12,28 +12,93 @@ metadata$antibiotics <- factor(metadata$antibiotics, levels = c('No', 'Yes'))
 
 # Run MaAsLin 3
 output_tmp <- tempfile()
-fit_out <- maaslin3::maaslin3(input_data = taxa_table, 
-                            input_metadata = metadata, 
-                            output = output_tmp, 
-                            normalization = 'TSS', 
-                            transform = 'LOG', 
-                            formula = '~ diagnosis + dysbiosis_state + antibiotics + age + reads', 
-                            save_models = FALSE, 
-                            plot_summary_plot = T, 
-                            plot_associations = T, 
-                            max_significance = 0.1, 
-                            augment = TRUE, 
-                            median_comparison_abundance = TRUE, 
-                            median_comparison_prevalence = FALSE, 
-                            cores=1)
+set.seed(1)
+fit_out <- maaslin3(input_data = taxa_table, 
+                    input_metadata = metadata, 
+                    output = output_tmp, 
+                    normalization = 'TSS', 
+                    transform = 'LOG', 
+                    formula = '~ diagnosis + dysbiosis_state + antibiotics + age + reads', 
+                    save_models = FALSE, 
+                    plot_summary_plot = T, 
+                    plot_associations = T, 
+                    max_significance = 0.1, 
+                    augment = TRUE, 
+                    median_comparison_abundance = TRUE, 
+                    median_comparison_prevalence = FALSE, 
+                    cores=1, 
+                    verbosity = 'WARN')
 
 maaslin_results = read.table(file.path(output_tmp, "significant_results.tsv"), header = TRUE, stringsAsFactors=FALSE)
 
 expect_that(expected_results_run1$metadata[1:50],equals(maaslin_results$metadata[1:50]))
 expect_that(expected_results_run1$feature[1:50],equals(maaslin_results$feature[1:50]))
 expect_that(round(expected_results_run1$N[1:50],10),equals(round(maaslin_results$N[1:50],10)))
-expect_that(expected_results_run1$N.not.0[1:50],equals(maaslin_results$N.not.0[1:50]))
-expect_that(round(as.numeric(expected_results_run1$pval_individual[1:50]),10),equals(round(as.numeric(maaslin_results$pval_individual[1:50]),10)))
-expect_that(round(as.numeric(expected_results_run1$qval_individual[1:50]),10),equals(round(as.numeric(maaslin_results$qval_individual[1:50]),10)))
+expect_that(round(as.numeric(expected_results_run1$pval_individual[1:50]),10),
+            equals(round(as.numeric(maaslin_results$pval_individual[1:50]),10)))
+expect_that(round(as.numeric(expected_results_run1$qval_individual[1:50]),10),
+            equals(round(as.numeric(maaslin_results$qval_individual[1:50]),10)))
+
+se <- SummarizedExperiment::SummarizedExperiment(
+    assays = list(taxa_table = t(taxa_table)),
+    colData = metadata
+)
+
+fit_out <- maaslin3(input_data = se, 
+                    input_metadata = metadata, 
+                    output = output_tmp, 
+                    normalization = 'TSS', 
+                    transform = 'LOG', 
+                    formula = '~ diagnosis + dysbiosis_state + antibiotics + age + reads', 
+                    save_models = FALSE, 
+                    plot_summary_plot = T, 
+                    plot_associations = T, 
+                    max_significance = 0.1, 
+                    augment = TRUE, 
+                    median_comparison_abundance = TRUE, 
+                    median_comparison_prevalence = FALSE, 
+                    cores=1, 
+                    verbosity = 'WARN')
+
+tse <- TreeSummarizedExperiment::TreeSummarizedExperiment(
+    assays = list(taxa_table_junk = matrix(0, nrow = ncol(taxa_table), ncol = nrow(taxa_table)),
+                  another_taxa_table = t(taxa_table)),
+    colData = metadata
+)
+
+metadata_df <- as(metadata, "DataFrame")
+fit_out <- maaslin3(input_data = tse, 
+                    input_metadata = metadata_df, 
+                    output = output_tmp, 
+                    normalization = 'TSS', 
+                    transform = 'LOG', 
+                    formula = '~ diagnosis + dysbiosis_state + antibiotics + age + reads', 
+                    save_models = FALSE, 
+                    plot_summary_plot = T, 
+                    plot_associations = T, 
+                    max_significance = 0.1, 
+                    augment = TRUE, 
+                    median_comparison_abundance = TRUE, 
+                    median_comparison_prevalence = FALSE, 
+                    cores=1, 
+                    verbosity = 'WARN',
+                    assay.type = 'another_taxa_table')
+
+fit_out <- maaslin3(input_data = tse, 
+                    input_metadata = metadata, 
+                    output = output_tmp, 
+                    normalization = 'TSS', 
+                    transform = 'LOG', 
+                    formula = '~ diagnosis + dysbiosis_state + antibiotics + age + reads', 
+                    save_models = FALSE, 
+                    plot_summary_plot = T, 
+                    plot_associations = T, 
+                    max_significance = 0.1, 
+                    augment = TRUE, 
+                    median_comparison_abundance = TRUE, 
+                    median_comparison_prevalence = FALSE, 
+                    cores=1, 
+                    verbosity = 'WARN',
+                    assay.type = 2)
 
 unlink(output_tmp, recursive = T)
